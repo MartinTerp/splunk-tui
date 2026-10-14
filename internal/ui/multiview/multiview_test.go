@@ -1,11 +1,14 @@
 package multiview
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"splunk-tui/internal/config"
+	"splunk-tui/internal/history"
 	"splunk-tui/internal/spl"
 	"splunk-tui/internal/ui/browser"
 	"splunk-tui/internal/ui/search"
@@ -172,3 +175,43 @@ func TestMultiViewFullscreenMode(t *testing.T) {
 		t.Fatalf("expected 'f' while in fullscreen to exit fullscreen")
 	}
 }
+
+func TestMultiViewCtrlHHistoryTransfer(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "mv-history-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	th := theme.DefaultTheme()
+	cfg := &config.Config{}
+	cfgPath := filepath.Join(tempDir, "config.yaml")
+	_ = cfg.Save()
+	cfg, _ = config.Load(cfgPath)
+
+	conns := []browser.InstanceConnection{
+		{Bookmark: config.Bookmark{Name: "idx1", URL: "https://splunk1:8089"}},
+	}
+	mv := New(th, cfg, conns)
+	mv.SetDimensions(100, 30)
+
+	hPath := mv.historyPath()
+	_ = history.Append(hPath, "index=_internal | timechart count")
+
+	mv.focus = focusSearchSection
+	mv.searchBar.SetFocusSection(search.FocusInput)
+
+	mv, _ = mv.Update(tea.KeyMsg{Type: tea.KeyCtrlH})
+	if mv.historyModal == nil {
+		t.Fatalf("expected historyModal in multiview after Ctrl+H")
+	}
+
+	mv, _ = mv.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if mv.historyModal != nil {
+		t.Fatalf("expected historyModal to close after Enter")
+	}
+	if mv.searchBar.Query() != "index=_internal | timechart count" {
+		t.Errorf("expected query transferred to multiview search bar, got %q", mv.searchBar.Query())
+	}
+}
+

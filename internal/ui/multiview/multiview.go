@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"splunk-tui/internal/config"
+	"splunk-tui/internal/history"
 	"splunk-tui/internal/spl"
 	"splunk-tui/internal/ui/browser"
 	"splunk-tui/internal/ui/search"
@@ -31,6 +32,7 @@ type MultiViewModel struct {
 	focus         focusSection
 	grid          GridRenderer
 	validationErr string
+	historyModal  *search.HistoryModalModel
 	width         int
 	height        int
 }
@@ -76,7 +78,15 @@ func (m *MultiViewModel) SetDimensions(w, h int) {
 
 // SearchBarIsFocused reports whether the search query input is active.
 func (m MultiViewModel) SearchBarIsFocused() bool {
-	return m.focus == focusSearchSection && m.searchBar.IsFocused()
+	return (m.focus == focusSearchSection && m.searchBar.IsFocused()) || m.historyModal != nil
+}
+
+func (m MultiViewModel) historyPath() string {
+	dir := ""
+	if m.cfg != nil {
+		dir = m.cfg.Dir()
+	}
+	return history.FilePath(dir, "multiview")
 }
 
 // RunSearch dispatches the query across all instances if supported.
@@ -112,6 +122,11 @@ func (m MultiViewModel) RunSearch(query string) (MultiViewModel, tea.Cmd) {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	}
+
+	// Persist query to history file for multiview
+	if hPath := m.historyPath(); hPath != "" {
+		_ = history.Append(hPath, trimmed)
 	}
 
 	m.searchBar.Blur()
@@ -164,9 +179,30 @@ func (m *MultiViewModel) CancelAll() {
 
 // Update handles keyboard navigation, search bar input, and card polling results.
 func (m MultiViewModel) Update(msg tea.Msg) (MultiViewModel, tea.Cmd) {
+	// If history modal is open, delegate (except WindowSizeMsg which resizes both)
+	if m.historyModal != nil {
+		if _, isResize := msg.(tea.WindowSizeMsg); !isResize {
+			var cmd tea.Cmd
+			var closed bool
+			var selectedQuery string
+			*m.historyModal, cmd, closed, selectedQuery = m.historyModal.Update(msg)
+			if closed {
+				m.historyModal = nil
+				if selectedQuery != "" {
+					m.searchBar.SetQuery(selectedQuery)
+					m.searchBar.Focus()
+				}
+			}
+			return m, cmd
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.SetDimensions(msg.Width, msg.Height)
+		if m.historyModal != nil {
+			m.historyModal.SetDimensions(msg.Width, msg.Height)
+		}
 		return m, nil
 
 	case cardPollTickMsg:
@@ -191,6 +227,14 @@ func (m MultiViewModel) Update(msg tea.Msg) (MultiViewModel, tea.Cmd) {
 				m.isFullScreen = false
 				m.focus = focusSearchSection
 				m.searchBar.Focus()
+				return m, nil
+			}
+
+		case "ctrl+h":
+			if m.focus == focusSearchSection && m.searchBar.FocusSection() == search.FocusInput {
+				modal := search.NewHistoryModal(m.theme, m.historyPath(), "Multi View")
+				modal.SetDimensions(m.width, m.height)
+				m.historyModal = &modal
 				return m, nil
 			}
 
@@ -352,6 +396,10 @@ func (m MultiViewModel) Update(msg tea.Msg) (MultiViewModel, tea.Cmd) {
 
 // View renders the Multi View interface.
 func (m MultiViewModel) View() string {
+	if m.historyModal != nil {
+		return m.historyModal.View()
+	}
+
 	w := m.width
 	if w <= 0 {
 		w = 80

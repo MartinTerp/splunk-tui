@@ -490,17 +490,9 @@ func (m ChartPaneModel) renderLineChart(width int) string {
 		lines = append(lines, axisStyled+rowChars.String())
 	}
 
-	// Bottom axis line
-	bottomAxis := fmt.Sprintf("%6s ┴%s", "0", strings.Repeat("─", gridW))
+	// Bottom axis line and time labels
+	bottomAxis, timeAxis := m.renderXAxis(gridW)
 	lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.SubtleText).Render(bottomAxis))
-
-	// Time boundaries
-	t1, t2 := m.getTimeBounds()
-	timePadding := gridW - len(t1) - len(t2)
-	if timePadding < 2 {
-		timePadding = 2
-	}
-	timeAxis := fmt.Sprintf("%8s%s%s%s", "", t1, strings.Repeat(" ", timePadding), t2)
 	lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.SubtleText).Render(timeAxis))
 
 	// Legend for multiple series
@@ -993,17 +985,9 @@ func (m ChartPaneModel) renderEventCountChart(width int) string {
 		lines = append(lines, axisStyled+barStyled)
 	}
 
-	// Bottom axis line
-	bottomAxis := fmt.Sprintf("%6s ┴%s", "0", strings.Repeat("─", numCols))
+	// Bottom axis line and time labels
+	bottomAxis, timeAxis := m.renderXAxis(numCols)
 	lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.SubtleText).Render(bottomAxis))
-
-	// Time boundaries
-	t1, t2 := m.getTimeBounds()
-	timePadding := numCols - len(t1) - len(t2)
-	if timePadding < 2 {
-		timePadding = 2
-	}
-	timeAxis := fmt.Sprintf("%8s%s%s%s", "", t1, strings.Repeat(" ", timePadding), t2)
 	lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.SubtleText).Render(timeAxis))
 
 	return strings.Join(lines, "\n")
@@ -1174,17 +1158,9 @@ func (m ChartPaneModel) renderTimechartColumns(width int) string {
 		lines = append(lines, axisStyled+rowChars.String())
 	}
 
-	// Bottom axis line
-	bottomAxis := fmt.Sprintf("%6s ┴%s", "0", strings.Repeat("─", numCols))
+	// Bottom axis line and time labels
+	bottomAxis, timeAxis := m.renderXAxis(numCols)
 	lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.SubtleText).Render(bottomAxis))
-
-	// Time boundaries
-	t1, t2 := m.getTimeBounds()
-	timePadding := numCols - len(t1) - len(t2)
-	if timePadding < 2 {
-		timePadding = 2
-	}
-	timeAxis := fmt.Sprintf("%8s%s%s%s", "", t1, strings.Repeat(" ", timePadding), t2)
 	lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.SubtleText).Render(timeAxis))
 
 	// Legend for multiple series
@@ -1400,10 +1376,187 @@ func (m ChartPaneModel) getTimeBounds() (string, string) {
 	return "earliest", "latest"
 }
 
+func (m ChartPaneModel) getTimeAtFraction(f float64) string {
+	if f < 0 {
+		f = 0
+	}
+	if f > 1 {
+		f = 1
+	}
+
+	// 1. Check timechart / transforming results
+	if (m.detectedType == spl.ChartLine || m.detectedType == spl.ChartSparklines || m.detectedType == spl.ChartColumnTime) &&
+		m.results != nil && len(m.results.Results) > 0 {
+		rows := m.results.Results
+		idx := int(math.Round(f * float64(len(rows)-1)))
+		if idx >= 0 && idx < len(rows) {
+			if raw := rows[idx]["_time"]; raw != "" {
+				return formatTimeString(raw)
+			}
+		}
+	}
+
+	// 2. Check timeline buckets
+	if len(m.timeline) > 0 {
+		idx := int(math.Round(f * float64(len(m.timeline)-1)))
+		if idx >= 0 && idx < len(m.timeline) {
+			return m.timeline[idx].Time.Format("01/02 15:04")
+		}
+	}
+
+	// 3. Fallback to any results with _time
+	if m.results != nil && len(m.results.Results) > 0 {
+		rows := m.results.Results
+		idx := int(math.Round(f * float64(len(rows)-1)))
+		if idx >= 0 && idx < len(rows) {
+			if raw := rows[idx]["_time"]; raw != "" {
+				return formatTimeString(raw)
+			}
+		}
+	}
+
+	if f == 0 {
+		return "earliest"
+	}
+	if f == 1 {
+		return "latest"
+	}
+	return ""
+}
+
+func (m ChartPaneModel) renderXAxis(gridW int) (string, string) {
+	if gridW < 10 {
+		gridW = 10
+	}
+
+	type tickInfo struct {
+		fraction float64
+		col      int
+		label    string
+		startCol int
+		endCol   int
+	}
+
+	var fracs []float64
+	switch {
+	case gridW >= 160:
+		fracs = []float64{0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0}
+	case gridW >= 120:
+		fracs = []float64{0.0, 0.1667, 0.3333, 0.5, 0.6667, 0.8333, 1.0}
+	case gridW >= 80:
+		fracs = []float64{0.0, 0.25, 0.5, 0.75, 1.0}
+	case gridW >= 55:
+		fracs = []float64{0.0, 0.3333, 0.6667, 1.0}
+	case gridW >= 35:
+		fracs = []float64{0.0, 0.5, 1.0}
+	default:
+		fracs = []float64{0.0, 1.0}
+	}
+
+	var candidates []tickInfo
+	seenLabels := make(map[string]bool)
+
+	for _, f := range fracs {
+		lbl := m.getTimeAtFraction(f)
+		if lbl == "" || seenLabels[lbl] {
+			continue
+		}
+		seenLabels[lbl] = true
+
+		col := int(math.Round(f * float64(gridW-1)))
+		if col < 0 {
+			col = 0
+		}
+		if col >= gridW {
+			col = gridW - 1
+		}
+
+		var startCol int
+		if f == 0 {
+			startCol = 0
+		} else if f == 1.0 {
+			startCol = gridW - len(lbl)
+			if startCol < 0 {
+				startCol = 0
+			}
+		} else {
+			startCol = col - len(lbl)/2
+			if startCol < 0 {
+				startCol = 0
+			}
+			if startCol+len(lbl) > gridW {
+				startCol = gridW - len(lbl)
+			}
+		}
+
+		candidates = append(candidates, tickInfo{
+			fraction: f,
+			col:      col,
+			label:    lbl,
+			startCol: startCol,
+			endCol:   startCol + len(lbl),
+		})
+	}
+
+	// Filter out overlapping ticks while preserving the first and last bounds
+	var filtered []tickInfo
+	if len(candidates) > 0 {
+		filtered = append(filtered, candidates[0])
+		for i := 1; i < len(candidates)-1; i++ {
+			c := candidates[i]
+			prev := filtered[len(filtered)-1]
+			last := candidates[len(candidates)-1]
+
+			if c.startCol >= prev.endCol+2 && c.endCol+2 <= last.startCol {
+				filtered = append(filtered, c)
+			}
+		}
+		if len(candidates) > 1 {
+			last := candidates[len(candidates)-1]
+			prev := filtered[len(filtered)-1]
+			if last.startCol >= prev.endCol+1 {
+				filtered = append(filtered, last)
+			}
+		}
+	}
+
+	axisRunes := make([]rune, gridW)
+	for i := range axisRunes {
+		axisRunes[i] = '─'
+	}
+
+	labelRunes := make([]rune, gridW)
+	for i := range labelRunes {
+		labelRunes[i] = ' '
+	}
+
+	for _, t := range filtered {
+		if t.col > 0 && t.col < gridW {
+			axisRunes[t.col] = '┴'
+		}
+		for i, r := range t.label {
+			pos := t.startCol + i
+			if pos >= 0 && pos < gridW {
+				labelRunes[pos] = r
+			}
+		}
+	}
+
+	bottomAxis := fmt.Sprintf("%6s ┴%s", "0", string(axisRunes))
+	timeAxis := fmt.Sprintf("%8s%s", "", string(labelRunes))
+	return bottomAxis, timeAxis
+}
+
 func formatTimeString(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
+	}
+	// Parse Unix epoch seconds (float or int string, e.g. "1728900000.000")
+	if sec, err := strconv.ParseFloat(raw, 64); err == nil && sec > 1000000000 && sec < 5000000000 {
+		secInt := int64(sec)
+		nsec := int64((sec - float64(secInt)) * 1e9)
+		return time.Unix(secInt, nsec).Format("01/02 15:04")
 	}
 	formats := []string{
 		time.RFC3339,

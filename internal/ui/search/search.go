@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"splunk-tui/internal/config"
+	"splunk-tui/internal/history"
 	"splunk-tui/internal/spl"
 	"splunk-tui/internal/splunk"
 	"splunk-tui/internal/ui/theme"
@@ -69,6 +70,7 @@ type SearchModel struct {
 	table         TableModel
 	detail        *DetailModel
 	configModal   *ConfigExplorerModel
+	historyModal  *HistoryModalModel
 	statusBar     StatusBarModel
 
 	width         int
@@ -120,7 +122,15 @@ func (m SearchModel) Init() tea.Cmd {
 
 // SearchBarIsFocused reports whether the search text input has focus.
 func (m SearchModel) SearchBarIsFocused() bool {
-	return m.focus == focusSearch && m.searchBar.IsFocused()
+	return (m.focus == focusSearch && m.searchBar.IsFocused()) || m.historyModal != nil
+}
+
+func (m SearchModel) historyPath() string {
+	dir := ""
+	if m.cfg != nil {
+		dir = m.cfg.Dir()
+	}
+	return history.FilePath(dir, m.bookmark.Name)
 }
 
 // TabTitle returns a concise title for this search tab.
@@ -179,6 +189,24 @@ func (m SearchModel) Update(msg tea.Msg) (SearchModel, tea.Cmd) {
 		return m, cmd
 	}
 
+	// If history modal is open, delegate (except WindowSizeMsg which resizes both)
+	if m.historyModal != nil {
+		if _, isResize := msg.(tea.WindowSizeMsg); !isResize {
+			var cmd tea.Cmd
+			var closed bool
+			var selectedQuery string
+			*m.historyModal, cmd, closed, selectedQuery = m.historyModal.Update(msg)
+			if closed {
+				m.historyModal = nil
+				if selectedQuery != "" {
+					m.searchBar.SetQuery(selectedQuery)
+					m.searchBar.Focus()
+				}
+			}
+			return m, cmd
+		}
+	}
+
 	// If config explorer modal is open, delegate (except WindowSizeMsg which resizes both)
 	if m.configModal != nil {
 		if _, isResize := msg.(tea.WindowSizeMsg); !isResize {
@@ -197,6 +225,9 @@ func (m SearchModel) Update(msg tea.Msg) (SearchModel, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.recalculateLayout()
+		if m.historyModal != nil {
+			m.historyModal.SetDimensions(msg.Width, msg.Height)
+		}
 		if m.configModal != nil {
 			m.configModal.SetDimensions(msg.Width, msg.Height)
 		}
@@ -430,6 +461,12 @@ func (m SearchModel) Update(msg tea.Msg) (SearchModel, tea.Cmd) {
 			}
 
 		case "ctrl+h":
+			if m.focus == focusSearch && m.searchBar.FocusSection() == FocusInput {
+				modal := NewHistoryModal(m.theme, m.historyPath(), m.bookmark.Name)
+				modal.SetDimensions(m.width, m.height)
+				m.historyModal = &modal
+				return m, nil
+			}
 			if !m.searchBar.HasDropdown() && m.chartPane.IsVisible() {
 				m.chartPane.CycleHeight()
 				m.recalculateLayout()
@@ -582,6 +619,11 @@ func (m SearchModel) RunSearch(query string) (SearchModel, tea.Cmd) {
 	m.chartPane.ClearError()
 	m.statusBar.SetState(true, nil, 1, m.pageSize, 0, "")
 	m.setFocus(focusTable) // Move focus to results view
+
+	// Save search query to history file for this instance (with deduplication)
+	if hPath := m.historyPath(); hPath != "" {
+		_ = history.Append(hPath, query)
+	}
 
 	// Update chart pane for the new search type and recalculate layout
 	chartType := spl.DetectChartType(query)
@@ -816,7 +858,23 @@ func (m *SearchModel) recalculateLayout() {
 	}
 }
 
+// SetDimensions updates the allocated width and height and recalculates layout.
+func (m *SearchModel) SetDimensions(w, h int) {
+	m.width = w
+	m.height = h
+	m.recalculateLayout()
+	if m.historyModal != nil {
+		m.historyModal.SetDimensions(w, h)
+	}
+	if m.configModal != nil {
+		m.configModal.SetDimensions(w, h)
+	}
+}
+
 func (m SearchModel) View() string {
+	if m.historyModal != nil {
+		return m.historyModal.View()
+	}
 	if m.configModal != nil {
 		return m.configModal.View()
 	}

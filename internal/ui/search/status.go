@@ -143,7 +143,7 @@ func (m StatusBarModel) View() string {
 	}
 
 	bar := leftContent + strings.Repeat(" ", padding) + rightContent
-	return m.theme.StatusBar.Width(innerW).MaxHeight(1).Render(bar)
+	return m.theme.StatusBar.Width(m.width).MaxHeight(1).Render(bar)
 }
 
 func renderProgressBar(pct, width int) string {

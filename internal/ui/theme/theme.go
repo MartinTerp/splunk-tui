@@ -104,7 +104,6 @@ func DefaultTheme() Theme {
 		Padding(0, 1)
 
 	t.StatusBar = lipgloss.NewStyle().
-		Background(lipgloss.Color("#1A1D23")).
 		Foreground(t.SubtleText).
 		Padding(0, 1)
 
@@ -123,8 +122,7 @@ func DefaultTheme() Theme {
 		Foreground(t.Text)
 
 	t.TableRowAlt = lipgloss.NewStyle().
-		Foreground(t.Text).
-		Background(lipgloss.Color("#16191E"))
+		Foreground(t.Text)
 
 	t.TableSelected = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).

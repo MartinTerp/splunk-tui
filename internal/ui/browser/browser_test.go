@@ -68,3 +68,59 @@ func TestBrowserFilterByNameAndURL(t *testing.T) {
 		t.Fatalf("expected all 3 bookmarks restored after clearing filter, got %d", len(b.filteredBookmarks()))
 	}
 }
+
+func TestBrowserFooterDoesNotWrapOnNarrowTerminal(t *testing.T) {
+	th := theme.DefaultTheme()
+	cfg := &config.Config{
+		Bookmarks: []config.Bookmark{},
+	}
+
+	widths := []int{60, 75, 85, 95, 120}
+	for _, w := range widths {
+		b := New(th, cfg, nil)
+		b.width = w
+		b.height = 24
+		view := b.View()
+		lines := strings.Split(view, "\n")
+		// The bottom line should start with Ready or contain Ready, and should not have a second wrapped footer line
+		bottomLine := lines[len(lines)-1]
+		if strings.Contains(bottomLine, "quit") && !strings.Contains(bottomLine, "Ready") && len(lines) > 24 {
+			t.Errorf("width %d: footer wrapped onto an extra line! Total lines: %d", w, len(lines))
+		}
+	}
+}
+
+func TestBrowserDividersAndRowsDoNotWrap(t *testing.T) {
+	th := theme.DefaultTheme()
+	cfg := &config.Config{
+		Bookmarks: []config.Bookmark{
+			{Name: "boot", URL: "https://192.168.4.104:8090", Username: "admin", VerifySSL: false},
+			{Name: "test", URL: "https://192.168.4.104:8090", Username: "admin", VerifySSL: false},
+		},
+	}
+
+	widths := []int{70, 80, 100, 120, 150}
+	for _, w := range widths {
+		b := New(th, cfg, nil)
+		b.width = w
+		b.height = 24
+		view := b.View()
+
+		// Verify no line starts with wrapped dashes "--" or "─"
+		lines := strings.Split(view, "\n")
+		for lineIdx, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			// A wrapped divider artifact looks like a line with just 1-4 dashes
+			if (strings.HasPrefix(trimmed, "--") || strings.HasPrefix(trimmed, "──")) && len(trimmed) <= 4 {
+				t.Errorf("width %d, line %d: divider wrapped onto a new line: %q\nFull view:\n%s", w, lineIdx, line, view)
+			}
+		}
+
+		// Verify bookmark names appear in view
+		if !strings.Contains(view, "boot") || !strings.Contains(view, "test") {
+			t.Errorf("width %d: expected bookmarks in view, got:\n%s", w, view)
+		}
+	}
+}
+
+

@@ -446,4 +446,107 @@ func TestChartPaneErrorMessage(t *testing.T) {
 	}
 }
 
+func TestChartPaneMultiTickXAxis(t *testing.T) {
+	th := theme.DefaultTheme()
+	pane := NewChartPane(th)
+
+	// Create 49 results over 4 hours (07:50 to 11:50 with 5m interval) matching the user's search
+	baseTime := time.Date(2026, 10, 14, 7, 50, 0, 0, time.UTC)
+	var rows []map[string]string
+	for i := 0; i <= 48; i++ {
+		ts := baseTime.Add(time.Duration(i*5) * time.Minute)
+		rows = append(rows, map[string]string{
+			"_time": ts.Format(time.RFC3339),
+			"count": fmt.Sprintf("%d", 100+(i%10)*20),
+		})
+	}
+
+	res := &splunk.ResultsResponse{
+		Fields:  []string{"_time", "count"},
+		Results: rows,
+	}
+	pane.SetData(spl.ChartLine, nil, res)
+
+	// Test wide grid (140 columns)
+	bottomAxis, timeAxis := pane.renderXAxis(140)
+	if !strings.Contains(timeAxis, "10/14 07:50") {
+		t.Errorf("expected timeAxis to contain earliest '10/14 07:50', got:\n%s", timeAxis)
+	}
+	if !strings.Contains(timeAxis, "10/14 11:50") {
+		t.Errorf("expected timeAxis to contain latest '10/14 11:50', got:\n%s", timeAxis)
+	}
+	// At 140 columns, intermediate ticks should be present
+	tickCount := strings.Count(bottomAxis, "┴")
+	if tickCount < 4 {
+		t.Errorf("expected at least 4 ticks on bottomAxis for width 140, got %d:\n%s", tickCount, bottomAxis)
+	}
+	// Verify intermediate timestamps exist (e.g. 08:30, 08:50, 09:10, 09:50, 10:30, etc.)
+	foundIntermediate := false
+	for _, expected := range []string{"08:30", "08:50", "09:10", "09:50", "10:30", "10:50"} {
+		if strings.Contains(timeAxis, expected) {
+			foundIntermediate = true
+			break
+		}
+	}
+	if !foundIntermediate {
+		t.Errorf("expected intermediate timestamps in timeAxis, got:\n%s", timeAxis)
+	}
+
+	// Test medium grid (90 columns)
+	_, timeAxisMed := pane.renderXAxis(90)
+	if !strings.Contains(timeAxisMed, "10/14 07:50") || !strings.Contains(timeAxisMed, "10/14 11:50") {
+		t.Errorf("expected timeAxisMed to contain start and end timestamps, got:\n%s", timeAxisMed)
+	}
+	if !strings.Contains(timeAxisMed, "10/14 09:50") {
+		t.Errorf("expected timeAxisMed at 90 cols to contain midpoint '10/14 09:50', got:\n%s", timeAxisMed)
+	}
+
+	// Test narrow grid (25 columns) - should not crash or produce overlapping garbage
+	_, timeAxisNarrow := pane.renderXAxis(25)
+	if len(timeAxisNarrow) == 0 {
+		t.Errorf("expected non-empty timeAxis for narrow width")
+	}
+
+	// Test timeline bucket fallback
+	paneTimeline := NewChartPane(th)
+	var buckets []splunk.TimelineBucket
+	for i := 0; i <= 24; i++ {
+		buckets = append(buckets, splunk.TimelineBucket{
+			Time:  baseTime.Add(time.Duration(i*10) * time.Minute),
+			Count: int64(10 + i),
+		})
+	}
+	paneTimeline.SetData(spl.ChartEvents, buckets, nil)
+	_, tlAxis := paneTimeline.renderXAxis(100)
+	if !strings.Contains(tlAxis, "10/14 07:50") {
+		t.Errorf("expected timeline X-axis to contain start timestamp, got:\n%s", tlAxis)
+	}
+}
+
+func TestFormatTimeString(t *testing.T) {
+	// Standard ISO / RFC3339
+	iso := "2026-10-14T07:50:00.000Z"
+	if formatted := formatTimeString(iso); formatted != "10/14 07:50" {
+		t.Errorf("expected '10/14 07:50', got %q", formatted)
+	}
+
+	// Space separated
+	space := "2026-10-14 07:50:00"
+	if formatted := formatTimeString(space); formatted != "10/14 07:50" {
+		t.Errorf("expected '10/14 07:50', got %q", formatted)
+	}
+
+	// Unix epoch float
+	epochFloat := "1728892200.000" // 2024-10-14 07:50:00 UTC
+	formattedEpoch := formatTimeString(epochFloat)
+	if !strings.Contains(formattedEpoch, ":") || len(formattedEpoch) < 8 {
+		t.Errorf("expected epoch to format to date/time, got %q", formattedEpoch)
+	}
+
+	// Empty string
+	if formatted := formatTimeString(""); formatted != "" {
+		t.Errorf("expected empty string, got %q", formatted)
+	}
+}
+
 

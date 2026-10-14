@@ -567,7 +567,7 @@ func (m BrowserModel) View() string {
 		h = 24
 	}
 
-	// Inner width for Header and StatusBar (each has Padding(0, 1) = 2 columns padding)
+	// Content width inside padded Header and StatusBar (Padding(0, 1) = 2 columns padding)
 	innerW := w - 2
 	if innerW < 20 {
 		innerW = 20
@@ -585,7 +585,7 @@ func (m BrowserModel) View() string {
 		space = 2
 	}
 	headerText := headerTitle + strings.Repeat(" ", space) + backendInfo
-	header := m.theme.Header.Width(innerW).Render(headerText)
+	header := m.theme.Header.Width(w).MaxHeight(1).Render(headerText)
 
 	// 2. Body Area inside Card
 	bodyCardWidth := w - 4 // border (2) + padding (2)
@@ -637,25 +637,27 @@ func (m BrowserModel) View() string {
 			detailBlock,
 		)
 	} else {
+		contentWidth := bodyCardWidth - 2
+		if contentWidth < 18 {
+			contentWidth = 18
+		}
+
 		nameW := 20
 		userW := 14
 		sslW := 8
 		statusW := 14
 		prefixW := 6 // "▶ [✓] "
-		urlW := bodyCardWidth - (nameW + userW + sslW + statusW + prefixW + 5)
+		urlW := contentWidth - (nameW + userW + sslW + statusW + prefixW + 5)
 		if urlW < 14 {
 			urlW = 14
 		}
 
-		filterStyle := lipgloss.NewStyle().
-			Width(bodyCardWidth).
-			Padding(0, 1)
-		filterBar := filterStyle.Render(m.filterInput.View())
-		filterDivider := lipgloss.NewStyle().Foreground(m.theme.SurfaceBorder).Render(strings.Repeat("─", bodyCardWidth))
+		filterBar := m.filterInput.View()
+		filterDivider := lipgloss.NewStyle().Foreground(m.theme.SurfaceBorder).Render(strings.Repeat("─", contentWidth))
 
 		hdrText := fmt.Sprintf("      %-*s %-*s %-*s %-*s %-*s", nameW, "NAME", urlW, "URL", userW, "USERNAME", sslW, "SSL", statusW, "STATUS")
-		tableHeader := m.theme.TableHeader.Width(bodyCardWidth).Render(hdrText)
-		divider := lipgloss.NewStyle().Foreground(m.theme.SurfaceBorder).Render(strings.Repeat("─", bodyCardWidth))
+		tableHeader := m.theme.TableHeader.Render(hdrText)
+		divider := lipgloss.NewStyle().Foreground(m.theme.SurfaceBorder).Render(strings.Repeat("─", contentWidth))
 
 		var rows []string
 		rows = append(rows, filterBar, filterDivider, tableHeader, divider)
@@ -707,16 +709,29 @@ func (m BrowserModel) View() string {
 					statusPadded += strings.Repeat(" ", pad)
 				}
 
-				line := fmt.Sprintf("%s%s%s %s %s %s %s", cursorSymbol, checkSymbol, nameColPadded, urlColPadded, userColPadded, sslCol, statusPadded)
-
 				if isCurrent {
-					rows = append(rows, m.theme.TableSelected.Width(bodyCardWidth).Render(line))
-				} else {
-					if i%2 == 1 {
-						rows = append(rows, m.theme.TableRowAlt.Width(bodyCardWidth).Render(line))
-					} else {
-						rows = append(rows, m.theme.TableRow.Width(bodyCardWidth).Render(line))
+					cursorStyled := lipgloss.NewStyle().Foreground(m.theme.Primary).Bold(true).Render(cursorSymbol)
+					checkStyled := checkSymbol
+					if m.selected[bm.Name] {
+						checkStyled = lipgloss.NewStyle().Foreground(m.theme.Highlight).Bold(true).Render(checkSymbol)
 					}
+					nameStyled := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Render(nameColPadded)
+					urlStyled := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Render(urlColPadded)
+					userStyled := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Render(userColPadded)
+
+					line := fmt.Sprintf("%s%s%s %s %s %s %s", cursorStyled, checkStyled, nameStyled, urlStyled, userStyled, sslCol, statusPadded)
+					rows = append(rows, line)
+				} else {
+					checkStyled := checkSymbol
+					if m.selected[bm.Name] {
+						checkStyled = lipgloss.NewStyle().Foreground(m.theme.Highlight).Render(checkSymbol)
+					}
+					nameStyled := lipgloss.NewStyle().Foreground(m.theme.Text).Render(nameColPadded)
+					urlStyled := lipgloss.NewStyle().Foreground(m.theme.SubtleText).Render(urlColPadded)
+					userStyled := lipgloss.NewStyle().Foreground(m.theme.SubtleText).Render(userColPadded)
+
+					line := fmt.Sprintf("%s%s%s %s %s %s %s", cursorSymbol, checkStyled, nameStyled, urlStyled, userStyled, sslCol, statusPadded)
+					rows = append(rows, line)
 				}
 			}
 		}
@@ -782,23 +797,42 @@ func (m BrowserModel) View() string {
 	var leftStatusText string
 	var leftStatusStyle lipgloss.Style
 	selCount := m.selectedCount()
-	rightHelpText := "space: select  │  enter: connect  │  a: add  │  e: edit  │  d: delete  │  q: quit"
+
+	type hintTiers struct {
+		full  string
+		short string
+		min   string
+	}
+	var hints hintTiers
 
 	if m.connecting {
 		leftStatusText = fmt.Sprintf("%s Connecting to %s (%s)...", m.spinner.View(), m.connectingName, m.connectingURL)
 		leftStatusStyle = lipgloss.NewStyle().Foreground(m.theme.Primary).Bold(true)
-		rightHelpText = "connecting..."
+		hints = hintTiers{full: "connecting...", short: "connecting...", min: ""}
 	} else if m.errMsg != "" {
 		leftStatusText = "⚠ " + m.errMsg
 		leftStatusStyle = lipgloss.NewStyle().Foreground(m.theme.Error).Bold(true)
-		rightHelpText = "enter: retry  │  e: edit  │  q: quit"
+		hints = hintTiers{
+			full:  "enter: retry  │  e: edit  │  q: quit",
+			short: "enter: retry  │  q: quit",
+			min:   "q: quit",
+		}
 	} else if selCount >= 2 {
 		leftStatusText = fmt.Sprintf("⚡ %d instances selected (Multi View)", selCount)
 		leftStatusStyle = lipgloss.NewStyle().Foreground(m.theme.Highlight).Bold(true)
-		rightHelpText = "enter: connect multi view  │  space: uncheck  │  ctrl+a: all  │  q: quit"
+		hints = hintTiers{
+			full:  "enter: connect multi view  │  space: uncheck  │  ctrl+a: all  │  q: quit",
+			short: "enter: connect  │  space: uncheck  │  q: quit",
+			min:   "enter: connect",
+		}
 	} else if selCount == 1 {
 		leftStatusText = "1 instance selected"
 		leftStatusStyle = lipgloss.NewStyle().Foreground(m.theme.Highlight)
+		hints = hintTiers{
+			full:  "enter: connect  │  space: uncheck  │  a: add  │  e: edit  │  q: quit",
+			short: "enter: connect  │  space: uncheck  │  q: quit",
+			min:   "enter: connect",
+		}
 	} else if len(m.connectedInstances) > 0 {
 		var activeNames []string
 		for _, bm := range m.cfg.Bookmarks {
@@ -812,29 +846,53 @@ func (m BrowserModel) View() string {
 			leftStatusText = fmt.Sprintf("✔ Connected: %d instances (esc to resume)", len(activeNames))
 		}
 		leftStatusStyle = lipgloss.NewStyle().Foreground(m.theme.Primary).Bold(true)
-		rightHelpText = "esc: resume  │  /: filter  │  enter: switch  │  space: select  │  a: add  │  q: quit"
+		hints = hintTiers{
+			full:  "esc: resume  │  /: filter  │  enter: switch  │  space: select  │  a: add  │  q: quit",
+			short: "esc: resume  │  enter: switch  │  a: add  │  q: quit",
+			min:   "esc: resume  │  q: quit",
+		}
 	} else {
 		leftStatusText = "Ready"
 		leftStatusStyle = lipgloss.NewStyle().Foreground(m.theme.SubtleText)
-		rightHelpText = "/: filter  │  enter: connect  │  space: select  │  a: add  │  e: edit  │  d: delete  │  q: quit"
+		hints = hintTiers{
+			full:  "/: filter  │  enter: connect  │  space: select  │  a: add  │  e: edit  │  d: delete  │  q: quit",
+			short: "/: filter  │  enter: connect  │  a: add  │  q: quit",
+			min:   "enter: connect  │  q: quit",
+		}
 	}
 
 	if m.filtering {
 		leftStatusText = fmt.Sprintf("🔍 Filtering: %q (%d matches)", m.filterInput.Value(), len(m.filteredBookmarks()))
 		leftStatusStyle = lipgloss.NewStyle().Foreground(m.theme.Highlight).Bold(true)
-		rightHelpText = "enter: connect  │  esc: clear  │  up/down: navigate"
+		hints = hintTiers{
+			full:  "enter: connect  │  esc: clear  │  up/down: navigate",
+			short: "enter: connect  │  esc: clear",
+			min:   "esc: clear",
+		}
 	}
 
-	rightW := lipgloss.Width(rightHelpText)
-	maxLeft := innerW - rightW - 2
+	availWidth := innerW - 2
+	if availWidth < 10 {
+		availWidth = 10
+	}
 
-	if (m.errMsg != "" || m.connecting) && (maxLeft < lipgloss.Width(leftStatusText)) {
+	availForHints := availWidth - lipgloss.Width(leftStatusText) - 2
+	var rightHelpText string
+	if hints.full != "" && lipgloss.Width(hints.full) <= availForHints {
+		rightHelpText = hints.full
+	} else if hints.short != "" && lipgloss.Width(hints.short) <= availForHints {
+		rightHelpText = hints.short
+	} else if hints.min != "" && lipgloss.Width(hints.min) <= availForHints {
+		rightHelpText = hints.min
+	} else {
 		rightHelpText = ""
-		rightW = 0
-		maxLeft = innerW
 	}
 
-	if lipgloss.Width(leftStatusText) > maxLeft && maxLeft > 3 {
+	maxLeft := availWidth - lipgloss.Width(rightHelpText) - 1
+	if maxLeft < 10 {
+		maxLeft = 10
+	}
+	if lipgloss.Width(leftStatusText) > maxLeft {
 		leftStatusText = truncateText(leftStatusText, maxLeft)
 	}
 
@@ -844,12 +902,12 @@ func (m BrowserModel) View() string {
 		rightStyled = lipgloss.NewStyle().Foreground(m.theme.SubtleText).Render(rightHelpText)
 	}
 
-	gap := innerW - lipgloss.Width(leftStyled) - lipgloss.Width(rightStyled)
-	if gap < 0 {
-		gap = 0
+	gap := availWidth - lipgloss.Width(leftStyled) - lipgloss.Width(rightStyled)
+	if gap < 1 {
+		gap = 1
 	}
 	barContent := leftStyled + strings.Repeat(" ", gap) + rightStyled
-	footer := m.theme.StatusBar.Width(innerW).Render(barContent)
+	footer := m.theme.StatusBar.Width(w).MaxHeight(1).Render(barContent)
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, bodyCard, footer)
 }

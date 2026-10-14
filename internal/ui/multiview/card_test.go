@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"splunk-tui/internal/config"
+	"splunk-tui/internal/spl"
 	"splunk-tui/internal/splunk"
 	"splunk-tui/internal/ui/browser"
 	"splunk-tui/internal/ui/theme"
@@ -258,4 +260,41 @@ func TestCardJobErrorHandling(t *testing.T) {
 		t.Errorf("expected card view to display error message, got:\n%s", view)
 	}
 }
+
+func TestInstanceCardMultiTickXAxis(t *testing.T) {
+	th := theme.DefaultTheme()
+	conn := browser.InstanceConnection{
+		Bookmark: config.Bookmark{Name: "prod", URL: "https://splunk.example.com:8089"},
+	}
+	card := NewInstanceCard(0, conn, th)
+
+	baseTime := time.Date(2026, 10, 14, 8, 0, 0, 0, time.UTC)
+	var rows []map[string]string
+	for i := 0; i <= 24; i++ {
+		ts := baseTime.Add(time.Duration(i*10) * time.Minute)
+		rows = append(rows, map[string]string{
+			"_time": ts.Format(time.RFC3339),
+			"count": fmt.Sprintf("%d", 50+i*5),
+		})
+	}
+
+	res := &splunk.ResultsResponse{
+		Fields:  []string{"_time", "count"},
+		Results: rows,
+	}
+	card.cmdType = spl.MultiViewTimechart
+	card.results = res
+
+	bottomAxis, timeAxis := card.renderXAxis(100)
+	if !strings.Contains(timeAxis, "10/14 08:00") {
+		t.Errorf("expected start timestamp in card timeAxis, got:\n%s", timeAxis)
+	}
+	if !strings.Contains(timeAxis, "10/14 12:00") {
+		t.Errorf("expected end timestamp in card timeAxis, got:\n%s", timeAxis)
+	}
+	if strings.Count(bottomAxis, "┴") < 2 {
+		t.Errorf("expected intermediate ticks in bottomAxis, got:\n%s", bottomAxis)
+	}
+}
+
 

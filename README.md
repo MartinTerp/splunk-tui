@@ -91,7 +91,8 @@ go build -o splunk-tui .
 | `Ctrl+K` or `c` | Open full-screen Splunk Configuration Explorer |
 | `Ctrl+G` | Toggle collapse / expand chart pane |
 | `v` | Cycle chart visualization type (Bar, Pie, Column, Line, Spark) |
-| `h` or `Ctrl+H` | Cycle chart height (Small → Med → Lrg → Full) |
+| `h` | Cycle chart height (Small → Med → Lrg → Full) |
+| `Ctrl+H` | Open SPL search history modal (on input line) |
 | `Tab` / `Shift+Tab` | Cycle focus between Search Bar ⇄ Fields ⇄ Table |
 | `↑` / `↓` (`k` / `j`) | Navigate rows in results table or fields list |
 | `←` / `→` | Scroll table horizontally (or shift columns in transforming mode) |
@@ -182,6 +183,10 @@ bookmarks:
 - **`page_size`** (default: `50`): Number of events/results loaded per page in interactive dashboard tables.
 - **`default_time_range`** (default: `-24h`): Initial search window when connecting to an instance.
 
+### Per-Instance Search History
+- Searches are automatically persisted to `history_<instance>.txt` stored in the same directory as `config.yaml` (with duplicates cleanly removed).
+- When focused on the SPL search input, press `Ctrl+H` to open the search history modal, filter queries in real time, and press `Enter` to transfer any historical query back to your input line.
+
 ### Keyring Backends & Master Password
 - **`auto`** (default): Automatically chooses the best OS-level keyring:
   - Windows: Windows Credential Manager (`wincred`)
@@ -219,41 +224,3 @@ bookmarks:
 ./splunk-tui --instance prod-search --spl 'index=main error' --earliest -1h --latest now
 ```
 
----
-
-## 📦 GitHub Releases & Distribution
-
-### 1. Automated Releases via Git Tags (Recommended)
-This repository includes a GitHub Actions workflow (`.github/workflows/release.yml`) that automatically builds cross-platform binaries and publishes a GitHub Release whenever you push a version tag:
-
-```bash
-# Tag the current commit
-git tag v1.0.0
-
-# Push the tag to GitHub
-git push origin v1.0.0
-```
-
-GitHub Actions will automatically:
-1. Run tests across Linux, macOS, and Windows.
-2. Compile optimized production binaries.
-3. Package archives (`splunk-tui-linux-amd64.tar.gz`, `splunk-tui-darwin-amd64.tar.gz`, `splunk-tui-windows-amd64.zip`).
-4. Create a formal **GitHub Release** with changelogs and attached download assets.
-
-### 2. Manual Release via GitHub Web UI
-1. Go to the **Actions** tab on GitHub, click the latest **Build & Test** run, and download the build artifact for your OS.
-2. Go to **Releases** on your repository page and click **Draft a new release**.
-3. Choose or create a tag name (e.g. `v1.0.0`), write a release title, and drag-and-drop the binary or archive into the release assets area.
-4. Click **Publish release**.
-
----
-
-## 🔒 Security & Git Safety
-
-### Zero Repository Exposure
-- **No Secrets in Repo**: Passwords, bearer tokens, and session keys are never stored inside this repository.
-- **Protected by `.gitignore`**: The repository explicitly ignores local configuration files (`config.yaml`), local keyring files (`keyring/`), environment files (`.env*`), tokens (`*.token`), and certificates (`*.pem`, `*.key`).
-- **Safe to Push**: Pushing to GitHub or public remotes carries zero risk of leaking your saved Splunk credentials or server configurations.
-
-### Headless & CI/CD Best Practices
-- For automated testing or CLI runs in CI pipelines (e.g. GitHub Actions), supply credentials via environment variables (`SPLUNK_TUI_KEYRING_PASSWORD`) or configure temporary test tokens without committing credentials to version control.
