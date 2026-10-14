@@ -223,4 +223,3 @@ bookmarks:
 # Custom time range:
 ./splunk-tui --instance prod-search --spl 'index=main error' --earliest -1h --latest now
 ```
- 
