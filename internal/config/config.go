@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 
+	"time"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,6 +27,8 @@ const (
 	DefaultTimeRange = "-24h"
 	// DefaultKeyringBackend lets the secrets package pick the best backend.
 	DefaultKeyringBackend = "auto"
+	// DefaultTimeoutSeconds is the default REST API request timeout in seconds.
+	DefaultTimeoutSeconds = 30
 
 	appDirName = "splunk-tui"
 )
@@ -64,6 +68,8 @@ type Config struct {
 	PageSize         int        `yaml:"page_size"`
 	DefaultTimeRange string     `yaml:"default_time_range"`
 	KeyringBackend   string     `yaml:"keyring_backend"`
+	TimeoutSeconds   int        `yaml:"timeout_seconds"`
+	Timeout          int        `yaml:"timeout,omitempty"` // alias for timeout_seconds
 	Bookmarks        []Bookmark `yaml:"bookmarks"`
 
 	path string
@@ -111,6 +117,21 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.KeyringBackend) == "" {
 		c.KeyringBackend = DefaultKeyringBackend
 	}
+	if c.TimeoutSeconds <= 0 {
+		if c.Timeout > 0 {
+			c.TimeoutSeconds = c.Timeout
+		} else {
+			c.TimeoutSeconds = DefaultTimeoutSeconds
+		}
+	}
+}
+
+// APITimeout returns the configured REST API timeout as a time.Duration.
+func (c *Config) APITimeout() time.Duration {
+	if c == nil || c.TimeoutSeconds <= 0 {
+		return DefaultTimeoutSeconds * time.Second
+	}
+	return time.Duration(c.TimeoutSeconds) * time.Second
 }
 
 // Path returns the file path the config was loaded from.

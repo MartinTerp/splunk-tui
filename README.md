@@ -164,6 +164,7 @@ Passwords and tokens are **never** written to `config.yaml`:
 ```yaml
 page_size: 50
 default_time_range: -24h
+timeout_seconds: 30   # Splunk REST API timeout in seconds (default: 30)
 keyring_backend: auto # auto, wincred, keychain, secret-service, or file
 bookmarks:
   - name: prod-search
@@ -175,6 +176,11 @@ bookmarks:
     username: admin
     verify_ssl: false
 ```
+
+### Config Options & Timeouts
+- **`timeout_seconds`** (default: `30`): Maximum duration for Splunk REST API network calls (logins, job dispatches, and polling queries). You can increase this for slow networks or high-latency VPN environments.
+- **`page_size`** (default: `50`): Number of events/results loaded per page in interactive dashboard tables.
+- **`default_time_range`** (default: `-24h`): Initial search window when connecting to an instance.
 
 ### Keyring Backends & Master Password
 - **`auto`** (default): Automatically chooses the best OS-level keyring:
@@ -200,15 +206,45 @@ bookmarks:
 
 ### 2. Scripting & Automation (Non-Interactive)
 ```bash
-# Run SPL query and stream formatted events to terminal:
-./splunk-tui --instance prod-search --spl 'index=_internal sourcetype=splunkd | head 20'
+# Run SPL query and stream formatted events to terminal (automatically paginates all results):
+./splunk-tui --instance prod-search --spl 'index=_internal sourcetype=splunkd'
+
+# Limit max events/results returned:
+./splunk-tui --instance prod-search --spl 'index=_internal sourcetype=splunkd' --count 500
 
 # Output raw JSON to pipe into jq:
 ./splunk-tui --instance prod-search --spl '| stats count by sourcetype' --json | jq .
 
-# Custom time range and max count:
-./splunk-tui --instance prod-search --spl 'index=main error' --earliest -1h --latest now --count 100
+# Custom time range:
+./splunk-tui --instance prod-search --spl 'index=main error' --earliest -1h --latest now
 ```
+
+---
+
+## 📦 GitHub Releases & Distribution
+
+### 1. Automated Releases via Git Tags (Recommended)
+This repository includes a GitHub Actions workflow (`.github/workflows/release.yml`) that automatically builds cross-platform binaries and publishes a GitHub Release whenever you push a version tag:
+
+```bash
+# Tag the current commit
+git tag v1.0.0
+
+# Push the tag to GitHub
+git push origin v1.0.0
+```
+
+GitHub Actions will automatically:
+1. Run tests across Linux, macOS, and Windows.
+2. Compile optimized production binaries.
+3. Package archives (`splunk-tui-linux-amd64.tar.gz`, `splunk-tui-darwin-amd64.tar.gz`, `splunk-tui-windows-amd64.zip`).
+4. Create a formal **GitHub Release** with changelogs and attached download assets.
+
+### 2. Manual Release via GitHub Web UI
+1. Go to the **Actions** tab on GitHub, click the latest **Build & Test** run, and download the build artifact for your OS.
+2. Go to **Releases** on your repository page and click **Draft a new release**.
+3. Choose or create a tag name (e.g. `v1.0.0`), write a release title, and drag-and-drop the binary or archive into the release assets area.
+4. Click **Publish release**.
 
 ---
 

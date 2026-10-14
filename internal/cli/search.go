@@ -99,13 +99,13 @@ func Run(ctx context.Context, opts SearchOptions) error {
 		Username:  bm.Username,
 		Password:  password,
 		VerifySSL: bm.VerifySSL,
-		Timeout:   15 * time.Second,
+		Timeout:   opts.Config.APITimeout(),
 	})
 	if err != nil {
 		return fmt.Errorf("initializing Splunk client: %w", err)
 	}
 
-	loginCtx, loginCancel := context.WithTimeout(ctx, 10*time.Second)
+	loginCtx, loginCancel := context.WithTimeout(ctx, opts.Config.APITimeout())
 	defer loginCancel()
 	if err := client.Login(loginCtx); err != nil {
 		return fmt.Errorf("login failed for %s (%s): %w", bm.Name, bm.URL, err)
@@ -130,12 +130,17 @@ func Run(ctx context.Context, opts SearchOptions) error {
 	}
 
 	// 5. Dispatch search job
+	maxCount := 0
+	if opts.Count > 0 {
+		maxCount = opts.Count
+	}
 	sid, err := client.CreateJob(ctx, splunk.CreateJobOptions{
 		Search:        query,
 		EarliestTime:  earliest,
 		LatestTime:    latest,
 		StatusBuckets: 0,
 		Verbose:       true,
+		MaxCount:      maxCount,
 	})
 	if err != nil {
 		return fmt.Errorf("dispatching search job: %w", err)
@@ -183,26 +188,146 @@ func Run(ctx context.Context, opts SearchOptions) error {
 }
 
 func fetchAndOutputResults(ctx context.Context, client *splunk.Client, sid string, opts SearchOptions) error {
-	// First check events endpoint for raw logs
-	events, err := client.GetEvents(ctx, sid, 0, opts.Count)
-	if err == nil && events != nil && len(events.Results) > 0 {
-		if opts.JSON {
-			return PrintEventsJSON(opts.Out, events.Results)
-		}
-		return PrintEventsText(opts.Out, events.Results)
+	batchSize := 1000
+	if opts.Count > 0 && opts.Count < batchSize {
+		batchSize = opts.Count
 	}
 
-	// Fallback to transforming/tabular results endpoint
-	results, err := client.GetResults(ctx, sid, 0, opts.Count)
-	if err != nil {
-		return fmt.Errorf("fetching search results: %w", err)
+	// 1. Try events endpoint first with pagination
+	offset := int64(0)
+	totalEvents := 0
+	var collectedEvents []splunk.Event
+	hasEvents := false
+
+	for {
+		fetchCount := batchSize
+		if opts.Count > 0 && (opts.Count-totalEvents) < batchSize {
+			fetchCount = opts.Count - totalEvents
+		}
+
+		events, err := client.GetEvents(ctx, sid, offset, fetchCount)
+		if err != nil || events == nil || len(events.Results) == 0 {
+			break
+		}
+
+		hasEvents = true
+		num := len(events.Results)
+
+		if opts.JSON {
+			collectedEvents = append(collectedEvents, events.Results...)
+		} else {
+			if err := PrintEventsText(opts.Out, events.Results); err != nil {
+				return err
+			}
+		}
+
+		totalEvents += num
+		offset += int64(num)
+
+		if (opts.Count > 0 && totalEvents >= opts.Count) || num < fetchCount {
+			break
+		}
 	}
 
-	if results != nil && len(results.Results) > 0 {
+	if hasEvents {
 		if opts.JSON {
-			return PrintResultsJSON(opts.Out, results.Results)
+			return PrintEventsJSON(opts.Out, collectedEvents)
 		}
-		return PrintResultsText(opts.Out, results)
+		return nil
+	}
+
+	// 2. Fallback to transforming/tabular results endpoint with pagination
+	offset = 0
+	totalResults := 0
+	var collectedRows []map[string]string
+	var headers []string
+	hasRaw := false
+	hasResults := false
+
+	for {
+		fetchCount := batchSize
+		if opts.Count > 0 && (opts.Count-totalResults) < batchSize {
+			fetchCount = opts.Count - totalResults
+		}
+
+		results, err := client.GetResults(ctx, sid, offset, fetchCount)
+		if err != nil {
+			if !hasResults {
+				return fmt.Errorf("fetching search results: %w", err)
+			}
+			break
+		}
+		if results == nil || len(results.Results) == 0 {
+			break
+		}
+
+		hasResults = true
+		num := len(results.Results)
+
+		if opts.JSON {
+			collectedRows = append(collectedRows, results.Results...)
+		} else {
+			// On first batch, inspect columns and header
+			if offset == 0 {
+				headers = results.Fields
+				if len(headers) == 0 && len(results.Results) > 0 {
+					for k := range results.Results[0] {
+						headers = append(headers, k)
+					}
+				}
+				for _, row := range results.Results {
+					if _, ok := row["_raw"]; ok {
+						hasRaw = true
+						break
+					}
+				}
+				if !hasRaw && len(headers) > 0 {
+					if _, err := fmt.Fprintln(opts.Out, strings.Join(headers, "\t")); err != nil {
+						return err
+					}
+				}
+			}
+
+			if hasRaw {
+				for _, row := range results.Results {
+					ts := row["_time"]
+					raw := strings.TrimRight(row["_raw"], "\r\n")
+					var line string
+					if ts != "" {
+						line = fmt.Sprintf("%s  %s\n", ts, raw)
+					} else {
+						line = fmt.Sprintf("%s\n", raw)
+					}
+					if _, err := io.WriteString(opts.Out, line); err != nil {
+						return err
+					}
+				}
+			} else {
+				for _, row := range results.Results {
+					cols := make([]string, len(headers))
+					for i, h := range headers {
+						cols[i] = row[h]
+					}
+					if _, err := fmt.Fprintln(opts.Out, strings.Join(cols, "\t")); err != nil {
+						return err
+					}
+				}
+			}
+		}
+
+		totalResults += num
+		offset += int64(num)
+
+		if (opts.Count > 0 && totalResults >= opts.Count) || num < fetchCount {
+			break
+		}
+	}
+
+	if hasResults {
+		if opts.JSON {
+			return PrintResultsJSON(opts.Out, collectedRows)
+		}
+		return nil
 	}
 
 	// No results returned

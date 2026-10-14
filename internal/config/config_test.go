@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestNormalizeURL(t *testing.T) {
@@ -66,8 +67,28 @@ func TestLoadMissingGivesDefaults(t *testing.T) {
 	if cfg.KeyringBackend != DefaultKeyringBackend {
 		t.Errorf("KeyringBackend = %q", cfg.KeyringBackend)
 	}
+	if cfg.TimeoutSeconds != DefaultTimeoutSeconds {
+		t.Errorf("TimeoutSeconds = %d, want %d", cfg.TimeoutSeconds, DefaultTimeoutSeconds)
+	}
+	if cfg.APITimeout() != 30*time.Second {
+		t.Errorf("APITimeout() = %v, want 30s", cfg.APITimeout())
+	}
 	if cfg.Path() != path {
 		t.Errorf("Path = %q", cfg.Path())
+	}
+}
+
+func TestTimeoutConfig(t *testing.T) {
+	cfg := &Config{TimeoutSeconds: 45}
+	cfg.applyDefaults()
+	if cfg.APITimeout() != 45*time.Second {
+		t.Errorf("APITimeout() = %v, want 45s", cfg.APITimeout())
+	}
+
+	cfgAlias := &Config{Timeout: 60}
+	cfgAlias.applyDefaults()
+	if cfgAlias.APITimeout() != 60*time.Second {
+		t.Errorf("APITimeout() with alias = %v, want 60s", cfgAlias.APITimeout())
 	}
 }
 

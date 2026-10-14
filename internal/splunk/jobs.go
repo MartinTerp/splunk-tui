@@ -143,6 +143,10 @@ func (c *Client) CreateJob(ctx context.Context, opts CreateJobOptions) (string, 
 		form.Set("adhoc_search_level", "smart")
 	}
 
+	if opts.MaxCount > 0 {
+		form.Set("max_count", strconv.Itoa(opts.MaxCount))
+	}
+
 	resp, err := c.request(ctx, http.MethodPost, "/services/search/jobs", nil, strings.NewReader(form.Encode()), "application/x-www-form-urlencoded")
 	if err != nil {
 		return "", fmt.Errorf("creating search job: %w", err)

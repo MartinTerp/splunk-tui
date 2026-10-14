@@ -605,7 +605,7 @@ func (m SearchModel) RunSearch(query string) (SearchModel, tea.Cmd) {
 	}
 
 	return m, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), m.cfg.APITimeout())
 		defer cancel()
 
 		sid, err := client.CreateJob(ctx, splunk.CreateJobOptions{
@@ -669,7 +669,7 @@ func (m SearchModel) pollStatus(sid string) tea.Cmd {
 	pageSize := m.pageSize
 
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), m.cfg.APITimeout())
 		defer cancel()
 
 		status, err := client.GetJobStatus(ctx, sid)

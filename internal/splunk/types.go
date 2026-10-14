@@ -21,6 +21,7 @@ type CreateJobOptions struct {
 	LatestTime    string
 	StatusBuckets int
 	Verbose       bool
+	MaxCount      int
 }
 
 // JobStatus represents the state of an ongoing or completed search job.

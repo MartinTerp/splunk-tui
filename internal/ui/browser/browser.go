@@ -421,13 +421,13 @@ func (m BrowserModel) ConnectTo(bm config.Bookmark) (BrowserModel, tea.Cmd) {
 			Username:  bm.Username,
 			Password:  password,
 			VerifySSL: bm.VerifySSL,
-			Timeout:   5 * time.Second,
+			Timeout:   m.cfg.APITimeout(),
 		})
 		if err != nil {
 			return connectErrMsg{bookmark: bm, err: err}
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), m.cfg.APITimeout())
 		defer cancel()
 
 		if err := client.Login(ctx); err != nil {
@@ -521,14 +521,14 @@ func (m BrowserModel) ConnectMulti(bookmarks []config.Bookmark) (BrowserModel, t
 					Username:  b.Username,
 					Password:  password,
 					VerifySSL: b.VerifySSL,
-					Timeout:   5 * time.Second,
+					Timeout:   m.cfg.APITimeout(),
 				})
 				if err != nil {
 					results[idx] = InstanceConnection{Bookmark: b, Err: err}
 					return
 				}
 
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), m.cfg.APITimeout())
 				defer cancel()
 
 				if err := client.Login(ctx); err != nil {
