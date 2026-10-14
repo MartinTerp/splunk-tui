@@ -179,15 +179,17 @@ func (m SearchModel) Update(msg tea.Msg) (SearchModel, tea.Cmd) {
 		return m, cmd
 	}
 
-	// If config explorer modal is open, delegate
+	// If config explorer modal is open, delegate (except WindowSizeMsg which resizes both)
 	if m.configModal != nil {
-		var cmd tea.Cmd
-		var closed bool
-		*m.configModal, cmd, closed = m.configModal.Update(msg)
-		if closed {
-			m.configModal = nil
+		if _, isResize := msg.(tea.WindowSizeMsg); !isResize {
+			var cmd tea.Cmd
+			var closed bool
+			*m.configModal, cmd, closed = m.configModal.Update(msg)
+			if closed {
+				m.configModal = nil
+			}
+			return m, cmd
 		}
-		return m, cmd
 	}
 
 	switch msg := msg.(type) {
@@ -195,6 +197,9 @@ func (m SearchModel) Update(msg tea.Msg) (SearchModel, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.recalculateLayout()
+		if m.configModal != nil {
+			m.configModal.SetDimensions(msg.Width, msg.Height)
+		}
 		return m, nil
 
 	case spinner.TickMsg:

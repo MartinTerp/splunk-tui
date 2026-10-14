@@ -107,3 +107,40 @@ func TestConfigExplorerModelNavigation(t *testing.T) {
 		t.Errorf("expected closed=true on final esc")
 	}
 }
+
+func TestConfigExplorerWindowing(t *testing.T) {
+	th := theme.DefaultTheme()
+	cm := NewConfigExplorer(th, nil)
+	height := 24
+	width := 100
+	cm.SetDimensions(width, height)
+
+	// Create 150 stanzas
+	var stanzas []splunk.ConfigStanza
+	for i := 0; i < 150; i++ {
+		stanzas = append(stanzas, splunk.ConfigStanza{
+			Name: strings.Repeat("stanza_", 2) + string(rune('a'+i%26)),
+			Properties: map[string]string{
+				"key1": "val1",
+				"key2": "val2",
+			},
+		})
+	}
+
+	cm, _, _ = cm.Update(configStanzasLoadedMsg{
+		confFile: "server",
+		stanzas:  stanzas,
+	})
+
+	view := cm.View()
+	lineCount := len(strings.Split(view, "\n"))
+	if lineCount > height {
+		t.Fatalf("expected view lines (%d) not to exceed terminal height (%d)", lineCount, height)
+	}
+
+	// Verify page down navigation works
+	cm, _, _ = cm.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	if cm.stanzaCursor != 10 {
+		t.Errorf("expected stanzaCursor to be 10 after PgDown, got %d", cm.stanzaCursor)
+	}
+}
