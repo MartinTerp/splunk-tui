@@ -347,15 +347,19 @@ func (m TableModel) Update(msg tea.Msg) (TableModel, tea.Cmd) {
 }
 
 func (m TableModel) View() string {
-	boxWidth := m.width - 4
-	if boxWidth < 30 {
-		boxWidth = 30
-	}
-
 	cardStyle := m.theme.Card
 	if m.focused {
 		cardStyle = m.theme.FocusedCard
 	}
+
+	frameSize := cardStyle.GetHorizontalFrameSize()
+	paddingSize := cardStyle.GetHorizontalPadding()
+
+	contentWidth := m.width - frameSize
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+	cardWidth := contentWidth + paddingSize
 
 	rowCount := len(m.events)
 	if m.isTransforming {
@@ -372,12 +376,12 @@ func (m TableModel) View() string {
 		errBody := lipgloss.NewStyle().Foreground(m.theme.Error).Render(m.errMsg)
 		errHelp := lipgloss.NewStyle().Foreground(m.theme.SubtleText).Render("Please check your SPL syntax, command names, and arguments.")
 		content := lipgloss.JoinVertical(lipgloss.Left, errHeader, "", errBody, "", errHelp)
-		return cardStyle.Width(boxWidth).Height(availInner).MaxHeight(m.height).Render(content)
+		return cardStyle.Width(cardWidth).Height(availInner).MaxHeight(m.height).Render(content)
 	}
 
 	if rowCount == 0 {
 		emptyMsg := lipgloss.NewStyle().Foreground(m.theme.SubtleText).Italic(true).Render("No results to display.")
-		return cardStyle.Width(boxWidth).Height(availInner).MaxHeight(m.height).Render(emptyMsg)
+		return cardStyle.Width(cardWidth).Height(availInner).MaxHeight(m.height).Render(emptyMsg)
 	}
 
 	var allHeaders []string
@@ -413,9 +417,11 @@ func (m TableModel) View() string {
 
 	var colWidths []int
 	if m.isTransforming || m.isTableCommand {
-		colWidths = calculateColumnWidths(headers, boxWidth, gapLen)
+		colWidths = calculateColumnWidths(headers, contentWidth, gapLen)
 	} else {
 		colWidths = make([]int, len(headers))
+		totalGaps := (len(headers) - 1) * gapLen
+
 		timeWidth := 30
 		for _, ev := range m.events {
 			tVal := strings.TrimSpace(ev.FieldValue("_time"))
@@ -427,19 +433,28 @@ func (m TableModel) View() string {
 			timeWidth = 35
 		}
 
-		totalGaps := (len(headers) - 1) * gapLen
-		if boxWidth-timeWidth-totalGaps < 20 && boxWidth > 55 {
-			timeWidth = boxWidth - totalGaps - 20
+		if contentWidth-totalGaps-15 < timeWidth {
+			timeWidth = contentWidth - totalGaps - 15
+			if timeWidth < 12 {
+				timeWidth = 12
+			}
 		}
 		colWidths[0] = timeWidth
 
-		remaining := boxWidth - colWidths[0] - totalGaps
+		remaining := contentWidth - colWidths[0] - totalGaps
 		for i := 1; i < len(headers)-1; i++ {
-			colWidths[i] = 16
-			remaining -= 16
+			fWidth := 16
+			if remaining-fWidth < 15 {
+				fWidth = remaining - 15
+				if fWidth < 8 {
+					fWidth = 8
+				}
+			}
+			colWidths[i] = fWidth
+			remaining -= fWidth
 		}
-		if remaining < 20 {
-			remaining = 20
+		if remaining < 1 {
+			remaining = 1
 		}
 		colWidths[len(headers)-1] = remaining // _raw gets the rest
 	}
@@ -461,8 +476,8 @@ func (m TableModel) View() string {
 		headerCells = append(headerCells, m.theme.TableHeader.Width(w).Render(headerText))
 	}
 	headerLine := strings.Join(headerCells, colGap)
-	if lipgloss.Width(headerLine) > boxWidth {
-		headerLine = truncate(headerLine, boxWidth)
+	if lipgloss.Width(headerLine) > contentWidth {
+		headerLine = truncate(headerLine, contentWidth)
 	}
 
 	// Render rows
@@ -499,7 +514,9 @@ func (m TableModel) View() string {
 				}
 			}
 
-			cleanVal := strings.ReplaceAll(val, "\n", " ")
+			cleanVal := strings.ReplaceAll(val, "\r", "")
+			cleanVal = strings.ReplaceAll(cleanVal, "\n", " ")
+			cleanVal = strings.ReplaceAll(cleanVal, "\t", "    ")
 			// If scrolled horizontally, slice text starting from hScroll
 			if (h == "_raw" || (m.isTransforming && len([]rune(cleanVal)) > w)) && m.hScroll > 0 {
 				runes := []rune(cleanVal)
@@ -531,15 +548,15 @@ func (m TableModel) View() string {
 		}
 
 		rowStr := strings.Join(cells, rowGap)
-		if lipgloss.Width(rowStr) > boxWidth {
-			rowStr = truncate(rowStr, boxWidth)
+		if lipgloss.Width(rowStr) > contentWidth {
+			rowStr = truncate(rowStr, contentWidth)
 		}
 		rowLines = append(rowLines, rowStr)
 	}
 
-	dividerLine := lipgloss.NewStyle().Foreground(m.theme.SurfaceBorder).Render(strings.Repeat("─", boxWidth))
+	dividerLine := lipgloss.NewStyle().Foreground(m.theme.SurfaceBorder).Render(strings.Repeat("─", contentWidth))
 	content := lipgloss.JoinVertical(lipgloss.Left, headerLine, dividerLine, lipgloss.JoinVertical(lipgloss.Left, rowLines...))
-	return cardStyle.Width(boxWidth).Height(availInner).MaxHeight(m.height).Render(content)
+	return cardStyle.Width(cardWidth).Height(availInner).MaxHeight(m.height).Render(content)
 }
 
 func calculateColumnWidths(headers []string, totalWidth int, gapLen int) []int {

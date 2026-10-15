@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"splunk-tui/internal/splunk"
 	"splunk-tui/internal/ui/theme"
 )
@@ -180,6 +181,78 @@ func TestTableFullTimeWidthAndSpacing(t *testing.T) {
 	// Verify spacing between columns is at least 4 spaces
 	if !strings.Contains(view, "    ") {
 		t.Errorf("expected view to contain column spacing with at least 4 spaces")
+	}
+}
+
+func TestTableSingleLinePerEvent(t *testing.T) {
+	th := theme.DefaultTheme()
+	tbl := NewTable(th, 20)
+	tbl.SetDimensions(100, 20)
+
+	longRaw := "2026-10-15 11:30:00 [ERROR] " + strings.Repeat("Very long event log payload with multiple parameters and data. ", 10)
+	events := []splunk.Event{
+		{"_time": "2026-10-15 11:30:00.000", "_raw": longRaw},
+		{"_time": "2026-10-15 11:31:00.000", "_raw": "Short event 2"},
+		{"_time": "2026-10-15 11:32:00.000", "_raw": "Line with extra newline\r\nand more content " + longRaw},
+	}
+
+	tbl.SetEvents("index=main", events, 1, 1, nil)
+	view := tbl.View()
+
+	lines := strings.Split(view, "\n")
+	if len(lines) != 20 {
+		t.Fatalf("expected view to have exactly 20 lines for height 20, got %d", len(lines))
+	}
+
+	for i, l := range lines {
+		w := lipgloss.Width(l)
+		if w != 100 {
+			t.Errorf("line %d width = %d, expected 100 (content wrapped or misaligned): %q", i, w, l)
+		}
+	}
+
+	// Line 1: Header row with _time and _raw
+	if !strings.Contains(lines[1], "_time") || !strings.Contains(lines[1], "_raw") {
+		t.Errorf("line 1 should be header line, got: %s", lines[1])
+	}
+
+	// Line 2: Divider line
+	if !strings.Contains(lines[2], "───") {
+		t.Errorf("line 2 should be divider line, got: %s", lines[2])
+	}
+
+	// Line 3: First event (exactly one line)
+	if !strings.Contains(lines[3], "2026-10-15 11:30:00.000") || !strings.Contains(lines[3], "Very long event") {
+		t.Errorf("line 3 should contain first event on a single line, got: %s", lines[3])
+	}
+
+	// Line 4: Second event (exactly one line)
+	if !strings.Contains(lines[4], "2026-10-15 11:31:00.000") || !strings.Contains(lines[4], "Short event 2") {
+		t.Errorf("line 4 should contain second event on a single line, got: %s", lines[4])
+	}
+
+	// Line 5: Third event (newline sanitized, exactly one line)
+	if !strings.Contains(lines[5], "2026-10-15 11:32:00.000") || !strings.Contains(lines[5], "with extra newline") {
+		t.Errorf("line 5 should contain third event on a single line, got: %s", lines[5])
+	}
+
+	// Line 6 should be empty space inside the card (no line wrapping overflow from events)
+	if strings.Contains(lines[6], "ERROR") || strings.Contains(lines[6], "Short") {
+		t.Errorf("line 6 should be empty inside card padding, got: %s", lines[6])
+	}
+
+	// Test horizontal scroll (arrow right)
+	tbl.hScroll = 15
+	scrolledView := tbl.View()
+	scrolledLines := strings.Split(scrolledView, "\n")
+	if len(scrolledLines) != 20 {
+		t.Fatalf("scrolled view expected 20 lines, got %d", len(scrolledLines))
+	}
+	if !strings.Contains(scrolledLines[1], "▶ +15") {
+		t.Errorf("header should indicate horizontal scroll +15, got: %s", scrolledLines[1])
+	}
+	if !strings.Contains(scrolledLines[3], "…") {
+		t.Errorf("scrolled event should start with ellipsis, got: %s", scrolledLines[3])
 	}
 }
 
