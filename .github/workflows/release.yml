@@ -17,17 +17,55 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
             target: linux-amd64
             bin: splunk-tui
             archive: splunk-tui-linux-amd64.tar.gz
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            target: linux-arm64
+            bin: splunk-tui
+            archive: splunk-tui-linux-arm64.tar.gz
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm
+            goarm: '7'
+            target: linux-armv7
+            bin: splunk-tui
+            archive: splunk-tui-linux-armv7.tar.gz
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm
+            goarm: '6'
+            target: linux-armv6
+            bin: splunk-tui
+            archive: splunk-tui-linux-armv6.tar.gz
           - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            target: darwin-arm64
+            bin: splunk-tui
+            archive: splunk-tui-darwin-arm64.tar.gz
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
             target: darwin-amd64
             bin: splunk-tui
             archive: splunk-tui-darwin-amd64.tar.gz
           - os: windows-latest
+            goos: windows
+            goarch: amd64
             target: windows-amd64
             bin: splunk-tui.exe
             archive: splunk-tui-windows-amd64.zip
+          - os: windows-latest
+            goos: windows
+            goarch: arm64
+            target: windows-arm64
+            bin: splunk-tui.exe
+            archive: splunk-tui-windows-arm64.zip
 
     steps:
       - name: Checkout Code
@@ -43,6 +81,11 @@ jobs:
         run: go test -v ./...
 
       - name: Build Binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: 0
         run: go build -v -ldflags="-s -w" -o ${{ matrix.bin }} .
 
       - name: Package Archive (Unix)
