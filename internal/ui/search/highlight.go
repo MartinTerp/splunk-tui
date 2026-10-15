@@ -1,6 +1,8 @@
 package search
 
 import (
+	"bytes"
+	"encoding/json"
 	"regexp"
 	"strings"
 
@@ -120,4 +122,127 @@ func HighlightLogText(text string, th theme.Theme) string {
 	})
 
 	return res
+}
+
+var (
+	reJSONKey   = regexp.MustCompile(`^(\s*)("([^"\\]*(\\.[^"\\]*)*)")\s*:(.*)$`)
+	reJSONValue = regexp.MustCompile(`("([^"\\]*(\\.[^"\\]*)*)"|-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\b|\btrue\b|\bfalse\b|\bnull\b|[{}\[\],])`)
+)
+
+// FormatRawJSON attempts to parse raw log text as JSON and return pretty-printed JSON.
+// It returns the formatted text and true if raw is valid JSON (or contains a JSON payload),
+// or the original text and false if not.
+func FormatRawJSON(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if len(trimmed) < 2 {
+		return raw, false
+	}
+
+	// 1. Direct JSON Object or Array
+	if (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) ||
+		(strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")) {
+		var buf bytes.Buffer
+		if err := json.Indent(&buf, []byte(trimmed), "", "  "); err == nil {
+			return buf.String(), true
+		}
+	}
+
+	// 2. Prefixed log with JSON payload (e.g. "TIMESTAMP [LEVEL] {...}")
+	firstBrace := strings.Index(trimmed, "{")
+	if firstBrace > 0 && strings.HasSuffix(trimmed, "}") {
+		prefix := strings.TrimSpace(trimmed[:firstBrace])
+		jsonPart := trimmed[firstBrace:]
+		var buf bytes.Buffer
+		if err := json.Indent(&buf, []byte(jsonPart), "", "  "); err == nil {
+			return prefix + "\n" + buf.String(), true
+		}
+	}
+
+	firstBracket := strings.Index(trimmed, "[")
+	if firstBracket > 0 && strings.HasSuffix(trimmed, "]") {
+		prefix := strings.TrimSpace(trimmed[:firstBracket])
+		jsonPart := trimmed[firstBracket:]
+		var buf bytes.Buffer
+		if err := json.Indent(&buf, []byte(jsonPart), "", "  "); err == nil {
+			return prefix + "\n" + buf.String(), true
+		}
+	}
+
+	return raw, false
+}
+
+// HighlightJSON applies syntax highlighting to pretty-printed JSON lines.
+func HighlightJSON(prettyJSON string, th theme.Theme) string {
+	if prettyJSON == "" {
+		return ""
+	}
+
+	keyStyle := lipgloss.NewStyle().Foreground(th.Highlight).Bold(true)
+	strStyle := lipgloss.NewStyle().Foreground(th.Success)
+	numStyle := lipgloss.NewStyle().Foreground(th.Warning)
+	boolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#C678DD")).Bold(true)
+	nullStyle := lipgloss.NewStyle().Foreground(th.SubtleText).Italic(true)
+	punctStyle := lipgloss.NewStyle().Foreground(th.SubtleText)
+
+	lines := strings.Split(prettyJSON, "\n")
+	highlightedLines := make([]string, len(lines))
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			highlightedLines[i] = line
+			continue
+		}
+
+		// Check if line looks like a log prefix line (not starting with JSON delimiters, quotes, or values)
+		firstChar := trimmed[0]
+		isJSONLine := strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "}") ||
+			strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "]") ||
+			strings.HasPrefix(trimmed, `"`) || (firstChar >= '0' && firstChar <= '9') ||
+			firstChar == '-' || strings.HasPrefix(trimmed, "true") ||
+			strings.HasPrefix(trimmed, "false") || strings.HasPrefix(trimmed, "null")
+
+		if !isJSONLine {
+			highlightedLines[i] = HighlightLogText(line, th)
+			continue
+		}
+
+		if match := reJSONKey.FindStringSubmatch(line); len(match) >= 6 {
+			indent := match[1]
+			key := match[2]
+			colon := ":"
+			rest := match[5]
+
+			styledKey := keyStyle.Render(key)
+			styledColon := punctStyle.Render(colon)
+			styledRest := reJSONValue.ReplaceAllStringFunc(rest, func(token string) string {
+				return styleJSONToken(token, strStyle, numStyle, boolStyle, nullStyle, punctStyle)
+			})
+
+			highlightedLines[i] = indent + styledKey + styledColon + styledRest
+		} else {
+			highlightedLines[i] = reJSONValue.ReplaceAllStringFunc(line, func(token string) string {
+				return styleJSONToken(token, strStyle, numStyle, boolStyle, nullStyle, punctStyle)
+			})
+		}
+	}
+
+	return strings.Join(highlightedLines, "\n")
+}
+
+func styleJSONToken(token string, strStyle, numStyle, boolStyle, nullStyle, punctStyle lipgloss.Style) string {
+	if strings.HasPrefix(token, `"`) {
+		return strStyle.Render(token)
+	}
+	switch token {
+	case "true", "false":
+		return boolStyle.Render(token)
+	case "null":
+		return nullStyle.Render(token)
+	case "{", "}", "[", "]", ",":
+		return punctStyle.Render(token)
+	default:
+		// Numbers
+		return numStyle.Render(token)
+	}
 }
