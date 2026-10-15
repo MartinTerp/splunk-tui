@@ -172,3 +172,30 @@ func TestUpsertAndDelete(t *testing.T) {
 		t.Error("empty username should fail")
 	}
 }
+
+func TestTokenAuthBookmark(t *testing.T) {
+	bmTokenAuth := Bookmark{Name: "token-instance", URL: "https://splunk.corp:8089", AuthType: "token"}
+	if err := bmTokenAuth.Validate(); err != nil {
+		t.Errorf("expected token bookmark without username to be valid, got: %v", err)
+	}
+	if !bmTokenAuth.IsTokenAuth() {
+		t.Errorf("expected bmTokenAuth.IsTokenAuth() to be true")
+	}
+
+	bmDirectToken := Bookmark{Name: "direct-token", URL: "https://splunk.corp:8089", Token: "abc123token"}
+	if err := bmDirectToken.Validate(); err != nil {
+		t.Errorf("expected direct token bookmark without username to be valid, got: %v", err)
+	}
+	if !bmDirectToken.IsTokenAuth() {
+		t.Errorf("expected bmDirectToken.IsTokenAuth() to be true")
+	}
+
+	cfg := &Config{}
+	if err := cfg.Upsert("", bmTokenAuth); err != nil {
+		t.Fatalf("failed to upsert token bookmark: %v", err)
+	}
+	saved, ok := cfg.Find("token-instance")
+	if !ok || saved.AuthType != "token" {
+		t.Errorf("expected saved bookmark to have AuthType=token, got %+v", saved)
+	}
+}

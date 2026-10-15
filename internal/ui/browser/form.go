@@ -14,15 +14,16 @@ import (
 type BookmarkFormResult struct {
 	OriginalName string
 	Bookmark     config.Bookmark
-	Password     string
+	Password     string // secret: password or token
 }
 
 // FormModel is the add/edit bookmark modal.
 type FormModel struct {
 	theme        theme.Theme
 	originalName string
-	inputs       []textinput.Model
-	focusIndex   int
+	inputs       []textinput.Model // [0]: name, [1]: url, [2]: username, [3]: password/token
+	focusIndex   int               // 0: name, 1: url, 2: authType, 3: user, 4: secret, 5: ssl, 6: save
+	isToken      bool
 	verifySSL    bool
 	width        int
 	height       int
@@ -53,20 +54,54 @@ func NewFormModel(theme theme.Theme, origName string, b config.Bookmark, initial
 	inputs[3].Placeholder = "••••••••"
 	inputs[3].EchoMode = textinput.EchoPassword
 	inputs[3].EchoCharacter = '•'
-	inputs[3].SetValue(initialPass)
+	secretVal := initialPass
+	if secretVal == "" && b.Token != "" {
+		secretVal = b.Token
+	}
+	inputs[3].SetValue(secretVal)
 	inputs[3].Width = 40
+
+	isToken := b.IsTokenAuth()
 
 	verify := true
 	if origName != "" {
 		verify = b.VerifySSL
 	}
 
-	return FormModel{
+	m := FormModel{
 		theme:        theme,
 		originalName: origName,
 		inputs:       inputs,
 		focusIndex:   0,
+		isToken:      isToken,
 		verifySSL:    verify,
+	}
+	m.updatePlaceholders()
+	return m
+}
+
+func (m *FormModel) updatePlaceholders() {
+	if m.isToken {
+		m.inputs[2].Placeholder = "optional display name"
+		m.inputs[3].Placeholder = "Splunk Bearer/JWT user token"
+	} else {
+		m.inputs[2].Placeholder = "e.g. admin"
+		m.inputs[3].Placeholder = "••••••••"
+	}
+}
+
+func (m FormModel) focusedInputIndex() int {
+	switch m.focusIndex {
+	case 0:
+		return 0
+	case 1:
+		return 1
+	case 3:
+		return 2
+	case 4:
+		return 3
+	default:
+		return -1
 	}
 }
 
@@ -84,32 +119,42 @@ func (m FormModel) Update(msg tea.Msg) (FormModel, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "tab", "down":
-			m.focusIndex = (m.focusIndex + 1) % 6
+			m.focusIndex = (m.focusIndex + 1) % 7
 			return m.updateFocus()
 		case "shift+tab", "up":
-			m.focusIndex = (m.focusIndex - 1 + 6) % 6
+			m.focusIndex = (m.focusIndex - 1 + 7) % 7
 			return m.updateFocus()
 		case " ":
-			if m.focusIndex == 4 { // SSL toggle
+			if m.focusIndex == 2 { // Auth type toggle
+				m.isToken = !m.isToken
+				m.updatePlaceholders()
+				return m, nil
+			}
+			if m.focusIndex == 5 { // SSL toggle
 				m.verifySSL = !m.verifySSL
 				return m, nil
 			}
 		case "enter":
-			if m.focusIndex == 5 || m.focusIndex == 3 { // Save button or Enter in password
+			if m.focusIndex == 6 || m.focusIndex == 4 { // Save button or Enter in secret field
 				return m.submit()
 			}
-			if m.focusIndex == 4 {
+			if m.focusIndex == 2 {
+				m.isToken = !m.isToken
+				m.updatePlaceholders()
+				return m, nil
+			}
+			if m.focusIndex == 5 {
 				m.verifySSL = !m.verifySSL
 				return m, nil
 			}
-			m.focusIndex = (m.focusIndex + 1) % 6
+			m.focusIndex = (m.focusIndex + 1) % 7
 			return m.updateFocus()
 		}
 	}
 
-	if m.focusIndex < 4 {
+	if idx := m.focusedInputIndex(); idx >= 0 {
 		var cmd tea.Cmd
-		m.inputs[m.focusIndex], cmd = m.inputs[m.focusIndex].Update(msg)
+		m.inputs[idx], cmd = m.inputs[idx].Update(msg)
 		return m, cmd
 	}
 
@@ -117,9 +162,10 @@ func (m FormModel) Update(msg tea.Msg) (FormModel, tea.Cmd) {
 }
 
 func (m FormModel) updateFocus() (FormModel, tea.Cmd) {
+	activeIdx := m.focusedInputIndex()
 	cmds := make([]tea.Cmd, len(m.inputs))
 	for i := range m.inputs {
-		if i == m.focusIndex {
+		if i == activeIdx {
 			cmds[i] = m.inputs[i].Focus()
 		} else {
 			m.inputs[i].Blur()
@@ -147,15 +193,26 @@ func (m FormModel) submit() (FormModel, tea.Cmd) {
 		m.errMsg = err.Error()
 		return m, nil
 	}
-	if user == "" {
-		m.errMsg = "Username is required"
-		return m, nil
+
+	authType := "password"
+	if m.isToken {
+		authType = "token"
+		if pass == "" && m.originalName == "" {
+			m.errMsg = "Auth token is required"
+			return m, nil
+		}
+	} else {
+		if user == "" {
+			m.errMsg = "Username is required"
+			return m, nil
+		}
 	}
 
 	bm := config.Bookmark{
 		Name:      name,
 		URL:       normalized,
 		Username:  user,
+		AuthType:  authType,
 		VerifySSL: m.verifySSL,
 	}
 
@@ -192,34 +249,64 @@ func (m FormModel) View() string {
 
 	// 2. Form content
 	desc := lipgloss.NewStyle().Foreground(m.theme.SubtleText).Render(
-		"Connect to the Splunk REST API management port (default 8089). Passwords are encrypted in your keyring.",
+		"Connect to the Splunk REST API management port (default 8089). Passwords and tokens are encrypted in your keyring.",
 	)
 
-	labels := []string{"Instance Name:", "URL (with port):", "Username:", "Password:"}
 	var fieldRows []string
 
-	for i := 0; i < 4; i++ {
-		lbl := lipgloss.NewStyle().Width(20).Bold(m.focusIndex == i).Foreground(m.theme.SubtleText).Render(labels[i])
-		box := m.inputs[i].View()
-		fieldRows = append(fieldRows, lipgloss.JoinHorizontal(lipgloss.Center, lbl, " ", box))
-	}
+	// Instance Name row (focusIndex 0)
+	nameLbl := lipgloss.NewStyle().Width(20).Bold(m.focusIndex == 0).Foreground(m.theme.SubtleText).Render("Instance Name:")
+	fieldRows = append(fieldRows, lipgloss.JoinHorizontal(lipgloss.Center, nameLbl, " ", m.inputs[0].View()))
 
-	// SSL Verification row
-	sslLabel := lipgloss.NewStyle().Width(20).Foreground(m.theme.SubtleText).Render("SSL Verification:")
+	// URL row (focusIndex 1)
+	urlLbl := lipgloss.NewStyle().Width(20).Bold(m.focusIndex == 1).Foreground(m.theme.SubtleText).Render("URL (with port):")
+	fieldRows = append(fieldRows, lipgloss.JoinHorizontal(lipgloss.Center, urlLbl, " ", m.inputs[1].View()))
+
+	// Auth Method row (focusIndex 2)
+	authLabel := lipgloss.NewStyle().Width(20).Bold(m.focusIndex == 2).Foreground(m.theme.SubtleText).Render("Auth Method:")
+	authTypeView := "[•] Password      ( ) Token"
+	if m.isToken {
+		authTypeView = "( ) Password      [•] Token (Bearer)"
+	}
+	if m.focusIndex == 2 {
+		authTypeView = m.theme.ActiveButton.Render(authTypeView)
+	} else {
+		authTypeView = m.theme.Button.Render(authTypeView)
+	}
+	fieldRows = append(fieldRows, lipgloss.JoinHorizontal(lipgloss.Center, authLabel, " ", authTypeView))
+
+	// Username row (focusIndex 3)
+	userLabelText := "Username:"
+	if m.isToken {
+		userLabelText = "Username (optional):"
+	}
+	userLbl := lipgloss.NewStyle().Width(20).Bold(m.focusIndex == 3).Foreground(m.theme.SubtleText).Render(userLabelText)
+	fieldRows = append(fieldRows, lipgloss.JoinHorizontal(lipgloss.Center, userLbl, " ", m.inputs[2].View()))
+
+	// Secret (Password / Token) row (focusIndex 4)
+	secretLabelText := "Password:"
+	if m.isToken {
+		secretLabelText = "Auth Token:"
+	}
+	secretLbl := lipgloss.NewStyle().Width(20).Bold(m.focusIndex == 4).Foreground(m.theme.SubtleText).Render(secretLabelText)
+	fieldRows = append(fieldRows, lipgloss.JoinHorizontal(lipgloss.Center, secretLbl, " ", m.inputs[3].View()))
+
+	// SSL Verification row (focusIndex 5)
+	sslLabel := lipgloss.NewStyle().Width(20).Bold(m.focusIndex == 5).Foreground(m.theme.SubtleText).Render("SSL Verification:")
 	sslCheck := "[ ] Insecure (skip certificate check)"
 	if m.verifySSL {
 		sslCheck = "[x] 🔒 Enabled (strict check)"
 	}
-	if m.focusIndex == 4 {
+	if m.focusIndex == 5 {
 		sslCheck = m.theme.ActiveButton.Render(sslCheck)
 	} else {
 		sslCheck = m.theme.Button.Render(sslCheck)
 	}
 	fieldRows = append(fieldRows, lipgloss.JoinHorizontal(lipgloss.Center, sslLabel, " ", sslCheck))
 
-	// Save button
+	// Save button (focusIndex 6)
 	saveBtn := "[ Save Bookmark ]"
-	if m.focusIndex == 5 {
+	if m.focusIndex == 6 {
 		saveBtn = m.theme.ActiveButton.Render(saveBtn)
 	} else {
 		saveBtn = m.theme.Button.Render(saveBtn)
@@ -256,7 +343,7 @@ func (m FormModel) View() string {
 
 	// 3. Footer
 	footerContent := lipgloss.NewStyle().Foreground(m.theme.SubtleText).Render(
-		"tab / shift+tab: switch field  │  space: toggle ssl  │  enter: save  │  esc: cancel",
+		"tab / shift+tab: switch field  │  space: toggle  │  enter: save  │  esc: cancel",
 	)
 	footer := m.theme.StatusBar.Width(innerW).Render(footerContent)
 

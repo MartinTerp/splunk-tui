@@ -386,3 +386,52 @@ func TestSplunkJobErrorHandling(t *testing.T) {
 		t.Errorf("expected status.ErrorMessage() to contain 'Subsearch query resulted in an error', got: %q", errMsg)
 	}
 }
+
+func TestSplunkClientTokenAuth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/services/auth/login" {
+			t.Fatalf("token auth should not hit /services/auth/login")
+		}
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer my-secret-token-xyz" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"messages":[{"type":"ERROR","text":"Invalid token"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"entry": [{
+				"content": {
+					"serverName": "token-authenticated-node",
+					"version": "9.2.0"
+				}
+			}]
+		}`))
+	}))
+	defer server.Close()
+
+	ctx := context.Background()
+	client, err := NewClient(ClientConfig{
+		BaseURL:  server.URL,
+		Token:    "my-secret-token-xyz",
+		AuthType: "token",
+	})
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+	if !client.IsTokenAuth() {
+		t.Fatalf("expected client.IsTokenAuth() to be true")
+	}
+
+	if err := client.Login(ctx); err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+
+	info, err := client.GetServerInfo(ctx)
+	if err != nil {
+		t.Fatalf("GetServerInfo failed: %v", err)
+	}
+	if info.ServerName != "token-authenticated-node" {
+		t.Errorf("expected server name 'token-authenticated-node', got %q", info.ServerName)
+	}
+}

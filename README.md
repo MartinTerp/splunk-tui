@@ -157,16 +157,22 @@ Configuration files and encrypted credentials are kept strictly in user-level di
   - File Keyring: `~/Library/Application Support/splunk-tui/keyring/`
 
 ### Example `config.yaml`
-Passwords and tokens are **never** written to `config.yaml`:
+Passwords and tokens are **never** written to `config.yaml` by default (they are stored encrypted in your keyring):
 ```yaml
 page_size: 50
 default_time_range: -24h
 timeout_seconds: 30   # Splunk REST API timeout in seconds (default: 30)
 keyring_backend: auto # auto, wincred, keychain, secret-service, or file
 bookmarks:
+  # Password authentication
   - name: prod-search
     url: https://splunk.corp:8089
     username: admin
+    verify_ssl: true
+  # Token authentication (Bearer / JWT user token)
+  - name: cloud-analytics
+    url: https://splunk-cloud.corp:8089
+    auth_type: token
     verify_ssl: true
   - name: dev-lab
     url: https://10.0.0.5:8089
@@ -218,4 +224,11 @@ bookmarks:
 
 # Custom time range:
 ./splunk-tui --instance prod-search --spl 'index=main error' --earliest -1h --latest now
+
+# Authenticate with Splunk API user token via flag:
+./splunk-tui --instance cloud-analytics --spl 'index=main error' --token 'eyJraWQiOiJ...'
+
+# Or pass token via environment variable:
+export SPLUNK_TOKEN='eyJraWQiOiJ...'
+./splunk-tui --instance cloud-analytics --spl 'index=main error'
 ```

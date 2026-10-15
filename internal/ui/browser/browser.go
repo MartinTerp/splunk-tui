@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -382,22 +383,22 @@ func (m BrowserModel) ConnectTo(bm config.Bookmark) (BrowserModel, tea.Cmd) {
 
 	sec := m.secrets
 	connectCmd := func() tea.Msg {
-		var password string
+		var secret string
 		if sec != nil {
 			type secretResult struct {
-				pass string
-				err  error
+				val string
+				err error
 			}
 			secCh := make(chan secretResult, 1)
 			go func() {
 				p, err := sec.Get(bm.Name)
-				secCh <- secretResult{pass: p, err: err}
+				secCh <- secretResult{val: p, err: err}
 			}()
 
 			select {
 			case res := <-secCh:
 				if res.err == nil {
-					password = res.pass
+					secret = res.val
 				}
 			case <-time.After(2 * time.Second):
 				return connectErrMsg{
@@ -407,22 +408,7 @@ func (m BrowserModel) ConnectTo(bm config.Bookmark) (BrowserModel, tea.Cmd) {
 			}
 		}
 
-		if bm.Username != "" && password == "" {
-			return connectErrMsg{bookmark: bm, err: fmt.Errorf("no password found for %q", bm.Name)}
-		}
-
-		normURL, err := bm.NormalizedURL()
-		if err != nil {
-			return connectErrMsg{bookmark: bm, err: err}
-		}
-
-		client, err := splunk.NewClient(splunk.ClientConfig{
-			BaseURL:   normURL,
-			Username:  bm.Username,
-			Password:  password,
-			VerifySSL: bm.VerifySSL,
-			Timeout:   m.cfg.APITimeout(),
-		})
+		client, err := createClientForBookmark(bm, secret, m.cfg.APITimeout())
 		if err != nil {
 			return connectErrMsg{bookmark: bm, err: err}
 		}
@@ -447,6 +433,55 @@ func (m BrowserModel) ConnectTo(bm config.Bookmark) (BrowserModel, tea.Cmd) {
 	}
 
 	return m, tea.Batch(m.spinner.Tick, connectCmd)
+}
+
+func createClientForBookmark(bm config.Bookmark, secret string, timeout time.Duration) (*splunk.Client, error) {
+	normURL, err := bm.NormalizedURL()
+	if err != nil {
+		return nil, err
+	}
+
+	clientCfg := splunk.ClientConfig{
+		BaseURL:   normURL,
+		Username:  bm.Username,
+		VerifySSL: bm.VerifySSL,
+		Timeout:   timeout,
+	}
+
+	if bm.IsTokenAuth() {
+		token := bm.Token
+		if token == "" {
+			token = secret
+		}
+		if token == "" {
+			if envToken := os.Getenv("SPLUNK_TOKEN"); envToken != "" {
+				token = envToken
+			} else if envToken := os.Getenv("SPLUNK_TUI_TOKEN"); envToken != "" {
+				token = envToken
+			}
+		}
+		if token == "" {
+			return nil, fmt.Errorf("no token found for %q", bm.Name)
+		}
+		clientCfg.Token = token
+		clientCfg.AuthType = "token"
+	} else {
+		password := secret
+		if password == "" {
+			if envPass := os.Getenv("SPLUNK_PASSWORD"); envPass != "" {
+				password = envPass
+			} else if envPass := os.Getenv("SPLUNK_TUI_PASSWORD"); envPass != "" {
+				password = envPass
+			}
+		}
+		if bm.Username != "" && password == "" {
+			return nil, fmt.Errorf("no password found for %q", bm.Name)
+		}
+		clientCfg.Password = password
+		clientCfg.AuthType = "password"
+	}
+
+	return splunk.NewClient(clientCfg)
 }
 
 func (m BrowserModel) selectedBookmarks() []config.Bookmark {
@@ -504,25 +539,13 @@ func (m BrowserModel) ConnectMulti(bookmarks []config.Bookmark) (BrowserModel, t
 			go func(idx int, b config.Bookmark) {
 				defer wg.Done()
 
-				var password string
+				var secret string
 				if sec != nil {
 					p, _ := sec.Get(b.Name)
-					password = p
+					secret = p
 				}
 
-				normURL, err := b.NormalizedURL()
-				if err != nil {
-					results[idx] = InstanceConnection{Bookmark: b, Err: err}
-					return
-				}
-
-				client, err := splunk.NewClient(splunk.ClientConfig{
-					BaseURL:   normURL,
-					Username:  b.Username,
-					Password:  password,
-					VerifySSL: b.VerifySSL,
-					Timeout:   m.cfg.APITimeout(),
-				})
+				client, err := createClientForBookmark(b, secret, m.cfg.APITimeout())
 				if err != nil {
 					results[idx] = InstanceConnection{Bookmark: b, Err: err}
 					return
@@ -692,7 +715,15 @@ func (m BrowserModel) View() string {
 				urlCol := truncateText(normURL, urlW)
 				urlColPadded := urlCol + strings.Repeat(" ", urlW-lipgloss.Width(urlCol))
 
-				userCol := truncateText(bm.Username, userW)
+				userDisplay := bm.Username
+				if bm.IsTokenAuth() {
+					if userDisplay == "" {
+						userDisplay = "[token]"
+					} else {
+						userDisplay = userDisplay + " [token]"
+					}
+				}
+				userCol := truncateText(userDisplay, userW)
 				userColPadded := userCol + strings.Repeat(" ", userW-lipgloss.Width(userCol))
 
 				sslCol := sslBadge
@@ -955,8 +986,13 @@ func buildConnectionErrorInfo(err error, bm config.Bookmark) *ConnectionErrorInf
 
 	case strings.Contains(s, "401") || strings.Contains(s, "Unauthorized") || strings.Contains(s, "Login failed"):
 		info.Title = "Authentication Failed"
-		info.Reason = fmt.Sprintf("Invalid username or password for %q", bm.Name)
-		info.Action = "Press 'e' to update your Splunk credentials"
+		if bm.IsTokenAuth() {
+			info.Reason = fmt.Sprintf("Invalid or expired token for %q", bm.Name)
+			info.Action = "Press 'e' to update your Splunk API token"
+		} else {
+			info.Reason = fmt.Sprintf("Invalid username or password for %q", bm.Name)
+			info.Action = "Press 'e' to update your Splunk credentials"
+		}
 
 	case strings.Contains(s, "404") || strings.Contains(s, "Not Found"):
 		info.Title = "Splunk REST API Not Found (404)"

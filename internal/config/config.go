@@ -37,8 +37,15 @@ const (
 type Bookmark struct {
 	Name      string `yaml:"name"`
 	URL       string `yaml:"url"`
-	Username  string `yaml:"username"`
+	Username  string `yaml:"username,omitempty"`
+	AuthType  string `yaml:"auth_type,omitempty"` // "password" (default) or "token"
+	Token     string `yaml:"token,omitempty"`     // direct token (optional, e.g. for headless config)
 	VerifySSL bool   `yaml:"verify_ssl"`
+}
+
+// IsTokenAuth reports whether this bookmark uses token-based authentication.
+func (b Bookmark) IsTokenAuth() bool {
+	return strings.EqualFold(strings.TrimSpace(b.AuthType), "token") || (strings.TrimSpace(b.Username) == "" && strings.TrimSpace(b.Token) != "")
 }
 
 // NormalizedURL returns the bookmark URL with defaults applied (see NormalizeURL).
@@ -57,7 +64,7 @@ func (b Bookmark) Validate() error {
 	if _, err := NormalizeURL(b.URL); err != nil {
 		return err
 	}
-	if strings.TrimSpace(b.Username) == "" {
+	if !b.IsTokenAuth() && strings.TrimSpace(b.Username) == "" {
 		return errors.New("username is required")
 	}
 	return nil
@@ -196,6 +203,8 @@ func (c *Config) Upsert(oldName string, b Bookmark) error {
 	b.Name = strings.TrimSpace(b.Name)
 	b.URL = strings.TrimSpace(b.URL)
 	b.Username = strings.TrimSpace(b.Username)
+	b.AuthType = strings.TrimSpace(b.AuthType)
+	b.Token = strings.TrimSpace(b.Token)
 	if err := b.Validate(); err != nil {
 		return err
 	}

@@ -30,11 +30,21 @@ type serverInfoResponse struct {
 }
 
 // Login authenticates with Splunk and caches the session key.
+// When token-based authentication is configured, Login succeeds immediately.
 func (c *Client) Login(ctx context.Context) error {
 	c.mu.RLock()
 	user := c.username
 	pass := c.password
+	token := c.sessionKey
+	isToken := c.isTokenAuth
 	c.mu.RUnlock()
+
+	if isToken {
+		if token == "" {
+			return fmt.Errorf("token is required for token authentication")
+		}
+		return nil
+	}
 
 	if user == "" || pass == "" {
 		return fmt.Errorf("username and password are required for login")

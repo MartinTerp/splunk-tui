@@ -169,4 +169,20 @@ func TestRunValidation(t *testing.T) {
 			t.Errorf("expected not found error, got: %v", err)
 		}
 	})
+
+	t.Run("Token Auth Missing Token", func(t *testing.T) {
+		cfg := &config.Config{
+			Bookmarks: []config.Bookmark{
+				{Name: "token-cluster", URL: "https://a:8089", AuthType: "token"},
+			},
+		}
+		err := Run(context.Background(), SearchOptions{
+			Config:       cfg,
+			InstanceName: "token-cluster",
+			SPL:          "index=_internal",
+		})
+		if err == nil || !strings.Contains(err.Error(), "no token found") {
+			t.Errorf("expected 'no token found' error, got: %v", err)
+		}
+	})
 }

@@ -24,12 +24,14 @@ var (
 	flagEarliest       string
 	flagLatest         string
 	flagCount          int
+	flagToken          string
 )
 
 func init() {
 	flag.StringVar(&flagInstance, "instance", "", "Auto-connect to bookmark by name")
 	flag.StringVar(&flagConfig, "config", "", "Path to custom config file (default ~/.config/splunk-tui/config.yaml)")
 	flag.StringVar(&flagKeyringBackend, "keyring-backend", "", "Keyring backend override (auto, file, secret-service, keychain, wincred, pass)")
+	flag.StringVar(&flagToken, "token", "", "Splunk authentication token override (bypasses keyring/password)")
 	flag.StringVar(&flagSPL, "spl", "", "Run SPL search non-interactively from CLI and print results")
 	flag.BoolVar(&flagJSON, "json", false, "Output search results in JSON format")
 	flag.StringVar(&flagEarliest, "earliest", "", "Earliest time for search (default: from config or -24h)")
@@ -118,6 +120,7 @@ func main() {
 			Earliest:     flagEarliest,
 			Latest:       flagLatest,
 			Count:        flagCount,
+			Token:        flagToken,
 		}
 
 		if err := cli.Run(context.Background(), opts); err != nil {

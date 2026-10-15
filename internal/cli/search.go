@@ -27,6 +27,7 @@ type SearchOptions struct {
 	Earliest     string
 	Latest       string
 	Count        int
+	Token        string
 	Out          io.Writer
 	ErrOut       io.Writer
 }
@@ -69,23 +70,12 @@ func Run(ctx context.Context, opts SearchOptions) error {
 	bm := found
 
 	// 2. Retrieve credentials
-	var password string
+	var secret string
 	if opts.Secrets != nil {
 		p, err := opts.Secrets.Get(bm.Name)
 		if err == nil {
-			password = p
+			secret = p
 		}
-	}
-	if password == "" {
-		if envPass := os.Getenv("SPLUNK_TUI_PASSWORD"); envPass != "" {
-			password = envPass
-		} else if envPass := os.Getenv("SPLUNK_PASSWORD"); envPass != "" {
-			password = envPass
-		}
-	}
-
-	if bm.Username != "" && password == "" {
-		return fmt.Errorf("no password found in secrets store for instance %q", bm.Name)
 	}
 
 	normURL, err := bm.NormalizedURL()
@@ -93,14 +83,52 @@ func Run(ctx context.Context, opts SearchOptions) error {
 		return fmt.Errorf("invalid URL for instance %q: %w", bm.Name, err)
 	}
 
-	// 3. Connect and authenticate
-	client, err := splunk.NewClient(splunk.ClientConfig{
+	clientCfg := splunk.ClientConfig{
 		BaseURL:   normURL,
 		Username:  bm.Username,
-		Password:  password,
 		VerifySSL: bm.VerifySSL,
 		Timeout:   opts.Config.APITimeout(),
-	})
+	}
+
+	useToken := opts.Token != "" || bm.IsTokenAuth()
+	if useToken {
+		token := opts.Token
+		if token == "" {
+			token = bm.Token
+		}
+		if token == "" {
+			token = secret
+		}
+		if token == "" {
+			if envToken := os.Getenv("SPLUNK_TOKEN"); envToken != "" {
+				token = envToken
+			} else if envToken := os.Getenv("SPLUNK_TUI_TOKEN"); envToken != "" {
+				token = envToken
+			}
+		}
+		if token == "" {
+			return fmt.Errorf("no token found in secrets store or environment for instance %q", bm.Name)
+		}
+		clientCfg.Token = token
+		clientCfg.AuthType = "token"
+	} else {
+		password := secret
+		if password == "" {
+			if envPass := os.Getenv("SPLUNK_TUI_PASSWORD"); envPass != "" {
+				password = envPass
+			} else if envPass := os.Getenv("SPLUNK_PASSWORD"); envPass != "" {
+				password = envPass
+			}
+		}
+		if bm.Username != "" && password == "" {
+			return fmt.Errorf("no password found in secrets store for instance %q", bm.Name)
+		}
+		clientCfg.Password = password
+		clientCfg.AuthType = "password"
+	}
+
+	// 3. Connect and authenticate
+	client, err := splunk.NewClient(clientCfg)
 	if err != nil {
 		return fmt.Errorf("initializing Splunk client: %w", err)
 	}

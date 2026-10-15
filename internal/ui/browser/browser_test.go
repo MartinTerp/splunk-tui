@@ -123,4 +123,63 @@ func TestBrowserDividersAndRowsDoNotWrap(t *testing.T) {
 	}
 }
 
+func TestFormModelTokenToggle(t *testing.T) {
+	th := theme.DefaultTheme()
+	form := NewFormModel(th, "", config.Bookmark{}, "")
+	if form.isToken {
+		t.Fatalf("expected initial auth mode to be password")
+	}
+
+	// Move focus to Auth Method (index 2)
+	form.focusIndex = 2
+	// Press space to toggle to Token
+	form, _ = form.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	if !form.isToken {
+		t.Fatalf("expected isToken to be true after pressing space on auth method")
+	}
+
+	// View should contain Token (Bearer)
+	view := form.View()
+	if !strings.Contains(view, "Token (Bearer)") {
+		t.Errorf("expected view to indicate Token mode, got:\n%s", view)
+	}
+
+	// Set name, url, and token
+	form.inputs[0].SetValue("my-token-cluster")
+	form.inputs[1].SetValue("https://splunk.corp:8089")
+	form.inputs[3].SetValue("test-token-jwt-value")
+
+	_, cmd := form.submit()
+	if cmd == nil {
+		t.Fatalf("expected non-nil cmd from form.submit(), err was: %s", form.errMsg)
+	}
+	resMsg := cmd()
+	res, ok := resMsg.(BookmarkFormResult)
+	if !ok {
+		t.Fatalf("expected BookmarkFormResult from form submit")
+	}
+	if !res.Bookmark.IsTokenAuth() {
+		t.Errorf("expected submitted bookmark to have IsTokenAuth()=true")
+	}
+	if res.Password != "test-token-jwt-value" {
+		t.Errorf("expected secret 'test-token-jwt-value', got %q", res.Password)
+	}
+}
+
+func TestBrowserTokenBadgeRendering(t *testing.T) {
+	th := theme.DefaultTheme()
+	cfg := &config.Config{
+		Bookmarks: []config.Bookmark{
+			{Name: "token-cluster", URL: "https://splunk.corp:8089", AuthType: "token"},
+		},
+	}
+	b := New(th, cfg, nil)
+	b.width = 100
+	b.height = 24
+	view := b.View()
+	if !strings.Contains(view, "[token]") {
+		t.Errorf("expected table row to render '[token]' badge for token auth bookmark, got:\n%s", view)
+	}
+}
+
 
