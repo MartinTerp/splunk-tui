@@ -156,3 +156,30 @@ func TestTableErrorMessage(t *testing.T) {
 	}
 }
 
+func TestTableFullTimeWidthAndSpacing(t *testing.T) {
+	th := theme.DefaultTheme()
+	tbl := NewTable(th, 20)
+	tbl.SetDimensions(120, 20)
+
+	fullTimestamp := "2026-10-15T10:59:39.000+02:00"
+	events := []splunk.Event{
+		{
+			"_time": fullTimestamp,
+			"_raw":  "audit log message from host=app01",
+		},
+	}
+
+	tbl.SetEvents("index=main", events, 1, 1, nil)
+	view := tbl.View()
+
+	// Verify the full 29-character timestamp appears completely without being truncated
+	if !strings.Contains(view, fullTimestamp) {
+		t.Errorf("expected view to contain full timestamp %q, got:\n%s", fullTimestamp, view)
+	}
+
+	// Verify spacing between columns is at least 4 spaces
+	if !strings.Contains(view, "    ") {
+		t.Errorf("expected view to contain column spacing with at least 4 spaces")
+	}
+}
+

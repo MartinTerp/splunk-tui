@@ -408,7 +408,7 @@ func (m TableModel) View() string {
 		headers = allHeaders[m.colOffset:]
 	}
 
-	const colGap = "   " // 3 spaces spacing between columns
+	const colGap = "    " // 4 spaces spacing between columns
 	gapLen := len(colGap)
 
 	var colWidths []int
@@ -416,9 +416,23 @@ func (m TableModel) View() string {
 		colWidths = calculateColumnWidths(headers, boxWidth, gapLen)
 	} else {
 		colWidths = make([]int, len(headers))
-		colWidths[0] = 20 // _time
+		timeWidth := 30
+		for _, ev := range m.events {
+			tVal := strings.TrimSpace(ev.FieldValue("_time"))
+			if l := lipgloss.Width(tVal); l > timeWidth {
+				timeWidth = l
+			}
+		}
+		if timeWidth > 35 {
+			timeWidth = 35
+		}
 
 		totalGaps := (len(headers) - 1) * gapLen
+		if boxWidth-timeWidth-totalGaps < 20 && boxWidth > 55 {
+			timeWidth = boxWidth - totalGaps - 20
+		}
+		colWidths[0] = timeWidth
+
 		remaining := boxWidth - colWidths[0] - totalGaps
 		for i := 1; i < len(headers)-1; i++ {
 			colWidths[i] = 16
@@ -537,11 +551,32 @@ func calculateColumnWidths(headers []string, totalWidth int, gapLen int) []int {
 	if avail < len(headers)*10 {
 		avail = len(headers) * 10
 	}
+
+	widths := make([]int, len(headers))
+
+	// If headers start with _time and end with _raw (common in table commands)
+	if headers[0] == "_time" && headers[len(headers)-1] == "_raw" && len(headers) >= 2 {
+		timeW := 30
+		if timeW > avail/2 {
+			timeW = avail / 2
+		}
+		widths[0] = timeW
+		remaining := avail - timeW
+		for i := 1; i < len(headers)-1; i++ {
+			widths[i] = 16
+			remaining -= 16
+		}
+		if remaining < 20 {
+			remaining = 20
+		}
+		widths[len(headers)-1] = remaining
+		return widths
+	}
+
 	avg := avail / len(headers)
 	if avg < 10 {
 		avg = 10
 	}
-	widths := make([]int, len(headers))
 	for i := range widths {
 		widths[i] = avg
 	}
