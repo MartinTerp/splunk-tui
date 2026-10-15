@@ -408,17 +408,21 @@ func (m TableModel) View() string {
 		headers = allHeaders[m.colOffset:]
 	}
 
+	const colGap = "   " // 3 spaces spacing between columns
+	gapLen := len(colGap)
+
 	var colWidths []int
 	if m.isTransforming || m.isTableCommand {
-		colWidths = calculateColumnWidths(headers, boxWidth)
+		colWidths = calculateColumnWidths(headers, boxWidth, gapLen)
 	} else {
 		colWidths = make([]int, len(headers))
 		colWidths[0] = 20 // _time
 
-		remaining := boxWidth - 24
+		totalGaps := (len(headers) - 1) * gapLen
+		remaining := boxWidth - colWidths[0] - totalGaps
 		for i := 1; i < len(headers)-1; i++ {
 			colWidths[i] = 16
-			remaining -= 18
+			remaining -= 16
 		}
 		if remaining < 20 {
 			remaining = 20
@@ -442,7 +446,7 @@ func (m TableModel) View() string {
 		}
 		headerCells = append(headerCells, m.theme.TableHeader.Width(w).Render(headerText))
 	}
-	headerLine := strings.Join(headerCells, " ")
+	headerLine := strings.Join(headerCells, colGap)
 	if lipgloss.Width(headerLine) > boxWidth {
 		headerLine = truncate(headerLine, boxWidth)
 	}
@@ -500,27 +504,19 @@ func (m TableModel) View() string {
 				style = m.theme.TableRowAlt
 			}
 
-			// Syntax highlight _raw events or highlight severity in _time
-			if !isCur && !m.isTransforming {
-				if h == "_raw" {
-					truncated = HighlightLogText(truncated, m.theme)
-				} else if h == "_time" {
-					lvl := DetectLogLevel(m.events[r].Raw())
-					switch lvl {
-					case LogLevelFatal, LogLevelError:
-						truncated = lipgloss.NewStyle().Foreground(m.theme.Error).Render("✖ " + truncated)
-					case LogLevelWarn:
-						truncated = lipgloss.NewStyle().Foreground(m.theme.Warning).Render("⚠ " + truncated)
-					case LogLevelInfo:
-						truncated = lipgloss.NewStyle().Foreground(m.theme.Success).Render("● " + truncated)
-					}
-				}
-			}
-
 			cells = append(cells, style.Width(w).Render(truncated))
 		}
 
-		rowStr := strings.Join(cells, " ")
+		rowGap := colGap
+		if isCur {
+			rowGap = m.theme.TableSelected.Render(colGap)
+		} else if r%2 == 1 {
+			rowGap = m.theme.TableRowAlt.Render(colGap)
+		} else {
+			rowGap = m.theme.TableRow.Render(colGap)
+		}
+
+		rowStr := strings.Join(cells, rowGap)
 		if lipgloss.Width(rowStr) > boxWidth {
 			rowStr = truncate(rowStr, boxWidth)
 		}
@@ -532,11 +528,16 @@ func (m TableModel) View() string {
 	return cardStyle.Width(boxWidth).Height(availInner).MaxHeight(m.height).Render(content)
 }
 
-func calculateColumnWidths(headers []string, totalWidth int) []int {
+func calculateColumnWidths(headers []string, totalWidth int, gapLen int) []int {
 	if len(headers) == 0 {
 		return nil
 	}
-	avg := (totalWidth - (len(headers) * 2)) / len(headers)
+	totalGaps := (len(headers) - 1) * gapLen
+	avail := totalWidth - totalGaps
+	if avail < len(headers)*10 {
+		avail = len(headers) * 10
+	}
+	avg := avail / len(headers)
 	if avg < 10 {
 		avg = 10
 	}

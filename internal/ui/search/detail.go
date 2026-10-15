@@ -80,13 +80,12 @@ func (m DetailModel) View() string {
 		// Raw section
 		lines = append(lines, "", m.theme.Title.Render("Raw Event Content (_raw):"))
 		rawText := m.event.Raw()
-		highlightedRaw := HighlightLogText(rawText, m.theme)
 		rawBox := lipgloss.NewStyle().
 			Width(boxWidth - 6).
 			Foreground(m.theme.Text).
 			Background(lipgloss.Color("#16191E")).
 			Padding(1).
-			Render(highlightedRaw)
+			Render(rawText)
 		lines = append(lines, rawBox)
 	} else if m.row != nil {
 		var keys []string

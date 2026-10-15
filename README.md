@@ -25,10 +25,6 @@
   - Interactive 3-column browser: Files ⇄ Stanzas ⇄ Key-Value Properties.
   - Filter stanzas and settings in real time (`/`).
   - Viewport windowing handles `.conf` files with hundreds of stanzas smoothly.
-- **🎯 Syntax Highlighting & Log Level Coloring**:
-  - High-contrast coloring for `FATAL`, `ERROR`, `WARN`, `INFO`, and `DEBUG` logs.
-  - Automatic detection and coloring of IPv4 addresses, key-value pairs (`key=value`), timestamps, and quoted strings.
-  - Visual severity status badges (`✖`, `⚠`, `●`) in table rows and event inspector.
 - **🔍 Instance Browser with Live Filtering**:
   - Manage and connect to known Splunk servers with instant connectivity checks.
   - Press `/` to filter bookmarks in real time across instance names and URLs.
@@ -141,7 +137,7 @@ go build -o splunk-tui .
 ### Event Inspector Modal (`Enter` on Table Row)
 | Key | Action |
 |---|---|
-| `↑` / `↓` (`k` / `j`) | Scroll through fields and syntax-highlighted `_raw` log |
+| `↑` / `↓` (`k` / `j`) | Scroll through fields and raw event log |
 | `Esc` / `Enter` / `q` | Close event inspector |
 
 ---
